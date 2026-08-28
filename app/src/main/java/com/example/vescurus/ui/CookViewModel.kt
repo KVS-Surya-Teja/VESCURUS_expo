@@ -36,7 +36,7 @@ class CookViewModel(application: Application) : AndroidViewModel(application), T
     var isTtsEnabled by mutableStateOf(true)
 
     private val chatModel = GenerativeModel(
-        modelName = "gemini-2.5-flash",
+        modelName = "gemini-3.6-flash",
         apiKey = BuildConfig.GEMINI_API_KEY
     )
 

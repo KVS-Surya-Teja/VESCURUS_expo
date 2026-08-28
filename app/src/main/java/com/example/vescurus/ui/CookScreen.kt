@@ -32,6 +32,8 @@ import com.example.vescurus.GoldPrimary
 import com.example.vescurus.model.DetectionResult
 import com.example.vescurus.model.EGG_RECIPES
 import com.example.vescurus.model.Recipe
+import com.example.vescurus.model.canonicalizeIngredientLabel
+import com.example.vescurus.model.deriveRecipeClass
 import com.example.vescurus.network.ConnectionStatus
 
 @Composable
@@ -44,13 +46,14 @@ fun CookScreen(
     onSnapshot: () -> Unit
 ) {
     var isVisionHudEnabled by remember { mutableStateOf(true) }
-    val isEggDetected = detections.any { 
-        it.label.contains("egg", ignoreCase = true) || it.recipe_class in 1..4 
+    val detectedClass = remember(detections) { deriveDetectedRecipeClass(detections) }
+    val shouldOpenRecipeSelection = detections.any {
+        canonicalizeIngredientLabel(it.label) == "egg" || detectedClass in 1..4
     }
     
     // Auto-trigger recipe selection when egg is first seen and we are idle
-    LaunchedEffect(isEggDetected) {
-        if (isEggDetected && viewModel.cookingState == CookingState.IDLE) {
+    LaunchedEffect(shouldOpenRecipeSelection) {
+        if (shouldOpenRecipeSelection && viewModel.cookingState == CookingState.IDLE) {
             viewModel.startRecipeSelection()
         }
     }
@@ -180,7 +183,7 @@ fun CookScreen(
                         }
                     }
                     CookingState.RECIPE_SELECTION -> {
-                        RecipeSelectionView(viewModel, detections)
+                        RecipeSelectionView(viewModel, detections, detectedClass)
                     }
                     CookingState.COUNTDOWN, CookingState.COOKING -> {
                         CookingActiveWorkflow(viewModel)
@@ -198,9 +201,7 @@ fun CookScreen(
 }
 
 @Composable
-fun RecipeSelectionView(viewModel: CookViewModel, detections: List<DetectionResult>) {
-    val detectedClass = detections.firstOrNull { it.recipe_class in 1..4 }?.recipe_class ?: 0
-    
+fun RecipeSelectionView(viewModel: CookViewModel, detections: List<DetectionResult>, detectedClass: Int) {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text(
             text = if (detectedClass > 0) "INGREDIENT DETECTED" else "NO INGREDIENTS YET",
@@ -243,6 +244,16 @@ fun RecipeSelectionView(viewModel: CookViewModel, detections: List<DetectionResu
             }
         }
     }
+}
+
+private fun deriveDetectedRecipeClass(detections: List<DetectionResult>): Int {
+    val labelBasedClass = deriveRecipeClass(
+        detections.mapNotNull { canonicalizeIngredientLabel(it.label) }
+    )
+    if (labelBasedClass != 0) {
+        return labelBasedClass
+    }
+    return detections.firstOrNull { it.recipe_class in 1..4 }?.recipe_class ?: 0
 }
 
 @Composable
