@@ -23,10 +23,19 @@ fun DetectionOverlay(detections: List<DetectionResult>) {
         val screenW = size.width
         val screenH = size.height
 
+        // GuideScreen displays the upright camera image in PreviewView using
+        // FILL_CENTER. The analyzer rotates the image before sending it to Gemini,
+        // so the expected upright source aspect ratio is approximately 3:4.
+        // FILL_CENTER crops the sides on a portrait phone; compensate for that
+        // crop when projecting normalized Gemini coordinates onto the screen.
+        val sourceAspect = 3f / 4f // upright camera frame: width / height
+        val displayedWidth = screenH * sourceAspect
+        val horizontalCrop = ((displayedWidth - screenW) / 2f).coerceAtLeast(0f)
+
         detections.forEach { detection ->
             val box = detection.box_2d
-            
-            // Normalize: handle both 0.0..1.0 and 0..1000 coordinates
+
+            // Normalize: handle both 0.0..1.0 and 0..1000 coordinates.
             var t = box.top
             var l = box.left
             var b = box.bottom
@@ -39,28 +48,38 @@ fun DetectionOverlay(detections: List<DetectionResult>) {
                 r /= 1000f
             }
 
-            // Project normalized coordinates to current canvas pixel bounds
+            // Gemini coordinates are relative to the full upright camera frame.
+            // Y maps directly because the preview fills the screen vertically.
+            // X needs the same horizontal crop applied by PreviewView/FILL_CENTER.
             val topPx = t * screenH
-            val leftPx = l * screenW
+            val leftPx = l * displayedWidth - horizontalCrop
             val bottomPx = b * screenH
-            val rightPx = r * screenW
-            val boxWidth = rightPx - leftPx
-            val boxHeight = bottomPx - topPx
+            val rightPx = r * displayedWidth - horizontalCrop
 
-            if (boxWidth > 0 && boxHeight > 0) {
-                // High contrast colors: Green for valid ingredients, Red for unsupported
-                val rectColor = if (detection.supported) Color(0xFF22C55E) else Color(0xFFFF5252)
+            // Clip to the visible preview. This prevents labels/boxes from
+            // extending into the cropped-out region.
+            val visibleLeft = leftPx.coerceIn(0f, screenW)
+            val visibleRight = rightPx.coerceIn(0f, screenW)
+            val visibleTop = topPx.coerceIn(0f, screenH)
+            val visibleBottom = bottomPx.coerceIn(0f, screenH)
+            val boxWidth = visibleRight - visibleLeft
+            val boxHeight = visibleBottom - visibleTop
 
-                // Draw bounding box
+            if (boxWidth > 0f && boxHeight > 0f) {
+                val rectColor = if (detection.supported) {
+                    Color(0xFF22C55E)
+                } else {
+                    Color(0xFFFF5252)
+                }
+
                 drawRoundRect(
                     color = rectColor,
-                    topLeft = Offset(leftPx, topPx),
+                    topLeft = Offset(visibleLeft, visibleTop),
                     size = Size(boxWidth, boxHeight),
                     cornerRadius = CornerRadius(6.dp.toPx(), 6.dp.toPx()),
                     style = Stroke(width = 3.dp.toPx())
                 )
 
-                // Draw label background and text
                 val labelText = "${detection.label.uppercase()} ${(detection.confidence * 100).toInt()}%"
                 val textLayoutResult = textMeasurer.measure(
                     text = AnnotatedString(labelText),
@@ -73,18 +92,19 @@ fun DetectionOverlay(detections: List<DetectionResult>) {
 
                 val tagHeight = textLayoutResult.size.height + 6.dp.toPx()
                 val tagWidth = textLayoutResult.size.width + 12.dp.toPx()
-                val tagTop = (topPx - tagHeight).coerceAtLeast(0f)
+                val tagTop = (visibleTop - tagHeight).coerceAtLeast(0f)
+                val tagLeft = visibleLeft.coerceAtMost((screenW - tagWidth).coerceAtLeast(0f))
 
                 drawRoundRect(
                     color = rectColor,
-                    topLeft = Offset(leftPx, tagTop),
+                    topLeft = Offset(tagLeft, tagTop),
                     size = Size(tagWidth, tagHeight),
                     cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
                 )
 
                 drawText(
                     textLayoutResult = textLayoutResult,
-                    topLeft = Offset(leftPx + 6.dp.toPx(), tagTop + 3.dp.toPx())
+                    topLeft = Offset(tagLeft + 6.dp.toPx(), tagTop + 3.dp.toPx())
                 )
             }
         }
