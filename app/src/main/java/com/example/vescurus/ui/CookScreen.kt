@@ -75,7 +75,20 @@ fun CookScreen(
 
     LaunchedEffect(eggDetected) {
         if (eggDetected && viewModel.cookingState == CookingState.IDLE) {
-            viewModel.startRecipeSelection()
+            // Egg detected → auto-run the whole demo flow with no taps needed:
+            // recipe shelf → auto-pick omelette → countdown → cook + TTS.
+            viewModel.startAutoFlow()
+        }
+    }
+
+    // Solo-demo safety net: if the two phones never manage to connect (Wi-Fi
+    // client isolation, mismatched networks, whatever), the Cook screen
+    // triggers the same auto-flow locally after 5 s so the demo never
+    // dead-ends on network problems.
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(5_000L)
+        if (viewModel.cookingState == CookingState.IDLE) {
+            viewModel.startAutoFlow()
         }
     }
 

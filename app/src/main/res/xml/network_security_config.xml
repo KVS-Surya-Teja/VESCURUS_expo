@@ -1,23 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Cleartext is permitted ONLY for the RFC1918 LAN ranges that the peer-to-peer
-    Guide↔Cook WebSocket runs over. Every other host (including generativelanguage.googleapis.com)
-    is HTTPS-only.
+    Demo scope: cleartext is broadly permitted so the Guide↔Cook LAN WebSocket
+    (which uses `ws://<peer-ip>/…`) reaches its peer. Android's <domain> elements
+    take hostnames, not CIDR ranges, so there is no clean way to whitelist just
+    RFC1918 IPs from this file — restricting cleartext here silently killed the
+    WS handshake. Production hardening is deferred to WSS + PIN pairing or the
+    Nearby Connections API (see the follow-up doc).
 -->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="false">
+    <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
     </base-config>
-    <domain-config cleartextTrafficPermitted="true">
-        <!-- 10.0.0.0/8 -->
-        <domain includeSubdomains="true">10.0.0.0</domain>
-        <!-- 172.16.0.0/12 -->
-        <domain includeSubdomains="true">172.16.0.0</domain>
-        <!-- 192.168.0.0/16 -->
-        <domain includeSubdomains="true">192.168.0.0</domain>
-        <!-- Loopback (emulator / instrumentation) -->
-        <domain includeSubdomains="true">localhost</domain>
-    </domain-config>
 </network-security-config>

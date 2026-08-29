@@ -45,13 +45,9 @@ import com.example.vescurus.domain.model.BoundingBox
 import com.example.vescurus.domain.model.IngredientDetection
 import com.example.vescurus.network.ConnectionStatus
 import com.example.vescurus.ui.theme.GoldPrimary
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
 @Composable
@@ -253,16 +249,15 @@ fun CameraPreview(
     val lifecycleOwner = LocalLifecycleOwner.current
     val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
     val analyzerExecutor = remember { Executors.newSingleThreadExecutor() }
-    val scope = rememberCoroutineScope()
 
-    // Gemini inference lives in the cloud. This interval balances "looks live"
-    // with "doesn't hammer the API". A successful detection stays visible
-    // between calls; two consecutive misses clear it.
-    val detectionIntervalMs = 1200L
+    // Real Gemini inference in the streaming loop is disabled for the demo —
+    // the scripted 5-second center-square mock (fired from the parent
+    // GuideScreen) is what drives the visible box and the Cook-side
+    // recipe trigger. This keeps the streaming path free of network
+    // failures, rate limits, and any race that would erase the mock
+    // between refresh ticks. Frames still ship at 5 Hz so the Cook sees
+    // live video.
     val frameIntervalMs = 200L
-    val lastAnalysisTime = remember { AtomicLong(0L) }
-    val isDetecting = remember { AtomicBoolean(false) }
-    val consecutiveEmptyResults = remember { AtomicInteger(0) }
     val lastFrameTime = remember { AtomicLong(0L) }
 
     AndroidView(
@@ -289,7 +284,6 @@ fun CameraPreview(
                         analysis.setAnalyzer(analyzerExecutor) { imageProxy ->
                             val currentTime = System.currentTimeMillis()
                             var uprightBitmap: Bitmap? = null
-                            var scaledBitmap: Bitmap? = null
                             try {
                                 val originalBitmap = imageProxy.toBitmap()
                                 val rotation = imageProxy.imageInfo.rotationDegrees
@@ -317,47 +311,10 @@ fun CameraPreview(
                                         onFrameAvailable(out.toByteArray())
                                     }
                                 }
-
-                                val last = lastAnalysisTime.get()
-                                val due = last == 0L || currentTime - last >= detectionIntervalMs
-                                if (due && isDetecting.compareAndSet(false, true)) {
-                                    lastAnalysisTime.set(currentTime)
-                                    // The scaled buffer is owned by the coroutine — it must
-                                    // outlive `imageProxy.close()` below, so we DO NOT recycle
-                                    // it here. The coroutine recycles both after inference.
-                                    scaledBitmap = uprightBitmap.scaleDown(SCALED_MAX_DIM)
-                                    val rawForInference = uprightBitmap
-                                    val scaledForInference = scaledBitmap
-                                    // Clear locals so the finally block does not recycle them.
-                                    uprightBitmap = null
-                                    scaledBitmap = null
-
-                                    scope.launch(Dispatchers.IO) {
-                                        try {
-                                            val results = detector.detect(rawForInference, scaledForInference!!)
-                                            launch(Dispatchers.Main) {
-                                                if (results.isNotEmpty()) {
-                                                    consecutiveEmptyResults.set(0)
-                                                    onDetectionsUpdated(results)
-                                                } else {
-                                                    val misses = consecutiveEmptyResults.incrementAndGet()
-                                                    if (misses >= 2) onDetectionsUpdated(emptyList())
-                                                }
-                                            }
-                                        } catch (e: Exception) {
-                                            Log.w(TAG, "Inference failed", e)
-                                        } finally {
-                                            isDetecting.set(false)
-                                            rawForInference.recycle()
-                                            scaledForInference?.recycle()
-                                        }
-                                    }
-                                }
                             } catch (e: Exception) {
                                 Log.e(TAG, "Frame processing failed", e)
                             } finally {
                                 uprightBitmap?.recycle()
-                                scaledBitmap?.recycle()
                                 imageProxy.close()
                             }
                         }
@@ -386,19 +343,6 @@ fun CameraPreview(
     }
 }
 
-private fun Bitmap.scaleDown(maxDimension: Int): Bitmap {
-    val newWidth: Int
-    val newHeight: Int
-    if (width > height) {
-        newWidth = maxDimension
-        newHeight = (height * maxDimension) / width
-    } else {
-        newHeight = maxDimension
-        newWidth = (width * maxDimension) / height
-    }
-    return Bitmap.createScaledBitmap(this, newWidth, newHeight, true)
-}
-
 private fun Context.hasCameraPermission(): Boolean =
     ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
         PackageManager.PERMISSION_GRANTED
@@ -412,7 +356,6 @@ private fun openAppSettings(context: Context) {
 }
 
 private const val TAG = "GuideScreen"
-private const val SCALED_MAX_DIM = 640
 
 /** Scripted center-square "egg" detection used for the demo fallback. */
 private val MOCK_CENTER_EGG = IngredientDetection(

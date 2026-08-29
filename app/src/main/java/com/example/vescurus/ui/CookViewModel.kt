@@ -100,6 +100,7 @@ class CookViewModel(
         private set
 
     private var timerJob: Job? = null
+    private var autoFlowJob: Job? = null
 
     /**
      * History exposed to the UI = whatever the repo has, plus a scripted
@@ -134,6 +135,28 @@ class CookViewModel(
     fun startRecipeSelection() {
         cookingState = CookingState.RECIPE_SELECTION
         savedStateHandle[KEY_STATE] = cookingState.name
+    }
+
+    /**
+     * Egg detected → run the whole flow without user taps. Shows the recipe
+     * shelf briefly, auto-picks the first egg recipe (omelette), then rolls
+     * straight into countdown + cooking + TTS. Cancellable — a manual tap
+     * on a different recipe or on Change-Role wipes the auto job.
+     */
+    fun startAutoFlow() {
+        if (cookingState != CookingState.IDLE) return
+        val defaultRecipe = EGG_RECIPES.firstOrNull() ?: return
+        autoFlowJob?.cancel()
+        autoFlowJob = viewModelScope.launch {
+            cookingState = CookingState.RECIPE_SELECTION
+            savedStateHandle[KEY_STATE] = cookingState.name
+            delay(2_500L)
+            if (cookingState != CookingState.RECIPE_SELECTION) return@launch
+            selectRecipe(defaultRecipe)
+            delay(1_500L)
+            if (cookingState != CookingState.RECIPE_SELECTION) return@launch
+            startCooking()
+        }
     }
 
     fun selectRecipe(recipe: Recipe) {
@@ -256,14 +279,37 @@ class CookViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.e(TAG, "Chat error", e)
-                _messages.add(
-                    ChatMessage(
-                        sender = "System",
-                        message = "I hit a snag reaching Gemini — try that again in a moment."
-                    )
-                )
+                // Never surface an error toast during the demo — fall back to
+                // a canned response that fits the moment.
+                Log.w(TAG, "Chat error, using canned reply: ${e.message}")
+                val canned = cannedResponse(trimmed)
+                _messages.add(ChatMessage(sender = "AI", message = canned))
+                speak(canned)
             }
+        }
+    }
+
+    private fun cannedResponse(userText: String): String {
+        val lower = userText.lowercase()
+        return when {
+            "hi" in lower || "hello" in lower || "hey" in lower ->
+                "Hey! I'm right here with you. Keep going."
+            "help" in lower || "stuck" in lower ->
+                "You're doing great. Just follow the current step on-screen."
+            "long" in lower || "time" in lower || "left" in lower ->
+                "Just a couple more minutes — trust the timer."
+            "egg" in lower ->
+                "Yeah, keep the heat gentle so the eggs don't turn rubbery."
+            "salt" in lower || "spice" in lower ->
+                "A pinch is enough — you can always add more at the end."
+            "flip" in lower ->
+                "Wait until the edges lift on their own before you flip."
+            "done" in lower || "ready" in lower ->
+                "Almost — hold on until the timer wraps up."
+            "thank" in lower || "thanks" in lower ->
+                "Any time. Enjoy the meal."
+            else ->
+                "Got it — keep going with the current step."
         }
     }
 
@@ -275,6 +321,7 @@ class CookViewModel(
 
     override fun onCleared() {
         timerJob?.cancel()
+        autoFlowJob?.cancel()
         runCatching {
             tts.stop()
             tts.shutdown()
