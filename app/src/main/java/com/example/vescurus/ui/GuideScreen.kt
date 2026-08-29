@@ -29,15 +29,16 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.vescurus.GoldPrimary
-import com.example.vescurus.debug.VescurusLogger
 import com.example.vescurus.detector.GeminiIngredientDetector
 import com.example.vescurus.model.DetectionResult
 import com.example.vescurus.network.ConnectionStatus
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 @Composable
 fun GuideScreen(
@@ -62,15 +63,11 @@ fun GuideScreen(
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
-        onResult = { granted ->
-            hasCameraPermission = granted
-        }
+        onResult = { granted -> hasCameraPermission = granted }
     )
 
     LaunchedEffect(Unit) {
-        if (!hasCameraPermission) {
-            launcher.launch(Manifest.permission.CAMERA)
-        }
+        if (!hasCameraPermission) launcher.launch(Manifest.permission.CAMERA)
     }
 
     Box(
@@ -81,8 +78,7 @@ fun GuideScreen(
         if (hasCameraPermission) {
             CameraPreview(detector, onDetectionsUpdated, onFrameAvailable)
             DetectionOverlay(detections = detections)
-            
-            // SCANNING INDICATOR
+
             if (detections.isEmpty()) {
                 Box(
                     modifier = Modifier
@@ -104,7 +100,6 @@ fun GuideScreen(
             }
         }
 
-        // Top-left Back Button
         IconButton(
             onClick = onBack,
             modifier = Modifier
@@ -119,25 +114,14 @@ fun GuideScreen(
             )
         }
 
-        // Centered Overlays
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text(
-                text = "VESCURUS",
-                color = GoldPrimary,
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = "GUIDE",
-                color = Color.White,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Medium
-            )
+            Text("VESCURUS", color = GoldPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            Text("GUIDE", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Medium)
 
             Spacer(modifier = Modifier.weight(1f))
 
@@ -156,7 +140,7 @@ fun GuideScreen(
                         else -> "Initializing..."
                     }
                     Text(text = guideText, color = Color.White, fontSize = 16.sp)
-                    
+
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(top = 8.dp)
@@ -166,11 +150,7 @@ fun GuideScreen(
                             ConnectionStatus.LOST, ConnectionStatus.DISCONNECTED -> Color.Red
                             else -> Color.Gray
                         }
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(dotColor, shape = CircleShape)
-                        )
+                        Box(modifier = Modifier.size(8.dp).background(dotColor, shape = CircleShape))
                         Spacer(modifier = Modifier.width(8.dp))
                         val statusLabel = when (status) {
                             ConnectionStatus.CONNECTED -> "Connected"
@@ -179,11 +159,7 @@ fun GuideScreen(
                             ConnectionStatus.DISCONNECTED -> "Disconnected"
                             else -> "Idle"
                         }
-                        Text(
-                            text = statusLabel,
-                            color = Color.White,
-                            fontSize = 14.sp
-                        )
+                        Text(text = statusLabel, color = Color.White, fontSize = 14.sp)
                     }
 
                     if (diagnostics.isNotEmpty()) {
@@ -212,17 +188,26 @@ fun CameraPreview(
     val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
     val analyzerExecutor = remember { Executors.newSingleThreadExecutor() }
     val scope = rememberCoroutineScope()
-    
-    var lastAnalysisTime by remember { mutableLongStateOf(0L) }
-    var lastFrameTime by remember { mutableLongStateOf(0L) }
-    var isDetecting by remember { mutableStateOf(false) }
+
+    // Gemini is cloud inference, so this is intentionally fast enough to look
+    // live while avoiding multiple in-flight requests. The previous real
+    // detection remains on screen between successful inference results.
+    val detectionIntervalMs = 1200L
+    val lastAnalysisTime = remember { AtomicLong(0L) }
+    val isDetecting = remember { AtomicBoolean(false) }
+    val consecutiveEmptyResults = remember { AtomicInteger(0) }
+    val lastFrameTime = remember { AtomicLong(0L) }
 
     AndroidView(
         factory = { ctx ->
-            val previewView = PreviewView(ctx)
+            val previewView = PreviewView(ctx).apply {
+                // Keep the normal full-screen camera presentation.
+                scaleType = PreviewView.ScaleType.FILL_CENTER
+            }
+
             cameraProviderFuture.addListener({
                 val cameraProvider = cameraProviderFuture.get()
-                
+
                 val preview = Preview.Builder().build().also {
                     it.setSurfaceProvider(previewView.surfaceProvider)
                 }
@@ -230,50 +215,70 @@ fun CameraPreview(
                 val imageAnalysis = ImageAnalysis.Builder()
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .build()
-                    .also {
-                        it.setAnalyzer(analyzerExecutor) { imageProxy ->
+                    .also { analysis ->
+                        analysis.setAnalyzer(analyzerExecutor) { imageProxy ->
                             val currentTime = System.currentTimeMillis()
-                            
+
                             try {
-                                // USE BUILT-IN toBitmap() - MUST BE 1.3.4+
                                 val originalBitmap = imageProxy.toBitmap()
                                 val rotation = imageProxy.imageInfo.rotationDegrees
-                                
                                 val matrix = Matrix().apply { postRotate(rotation.toFloat()) }
                                 val uprightBitmap = Bitmap.createBitmap(
-                                    originalBitmap, 0, 0, originalBitmap.width, originalBitmap.height, matrix, true
+                                    originalBitmap,
+                                    0,
+                                    0,
+                                    originalBitmap.width,
+                                    originalBitmap.height,
+                                    matrix,
+                                    true
                                 )
 
-                                // 1. VIDEO TRANSMISSION (Low-latency stream)
-                                if (currentTime - lastFrameTime >= 200) { 
-                                    lastFrameTime = currentTime
+                                // 1. Existing low-latency Guide -> Cook video feed.
+                                if (currentTime - lastFrameTime.get() >= 200L) {
+                                    lastFrameTime.set(currentTime)
                                     val out = ByteArrayOutputStream()
                                     uprightBitmap.compress(Bitmap.CompressFormat.JPEG, 35, out)
                                     onFrameAvailable(out.toByteArray())
                                 }
 
-                                // 2. AI DETECTION (Throttled inference)
-                                if (currentTime - lastAnalysisTime >= 3000 && !isDetecting) {
-                                    lastAnalysisTime = currentTime
-                                    isDetecting = true
+                                // 2. Real Gemini object detection.
+                                // Run immediately on the first frame, then about once every 1.2 s.
+                                val last = lastAnalysisTime.get()
+                                val due = last == 0L || currentTime - last >= detectionIntervalMs
+
+                                if (due && isDetecting.compareAndSet(false, true)) {
+                                    lastAnalysisTime.set(currentTime)
                                     val scaledBitmap = uprightBitmap.scaleDown(640)
-                                    
+
                                     scope.launch(Dispatchers.IO) {
                                         try {
-                                            Log.d("CV_FLOW", "Starting Gemini inference...")
+                                            Log.d("CV_FLOW", "Starting Gemini egg inference...")
                                             val results = detector.detect(uprightBitmap, scaledBitmap)
+
                                             launch(Dispatchers.Main) {
-                                                onDetectionsUpdated(results)
+                                                if (results.isNotEmpty()) {
+                                                    // A successful real detection is kept visible until a later
+                                                    // inference positively says it has disappeared.
+                                                    consecutiveEmptyResults.set(0)
+                                                    onDetectionsUpdated(results)
+                                                } else {
+                                                    // Do not make a single transient network/model miss erase
+                                                    // the visible box. Clear only after two consecutive misses.
+                                                    val misses = consecutiveEmptyResults.incrementAndGet()
+                                                    if (misses >= 2) {
+                                                        onDetectionsUpdated(emptyList())
+                                                    }
+                                                }
                                             }
                                         } catch (e: Exception) {
-                                            Log.e("CV_FLOW", "Analysis failed: ${e.message}")
+                                            Log.e("CV_FLOW", "Gemini egg inference failed", e)
                                         } finally {
-                                            isDetecting = false
+                                            isDetecting.set(false)
                                         }
                                     }
                                 }
                             } catch (e: Exception) {
-                                Log.e("CameraPreview", "Frame processing failed: ${e.message}")
+                                Log.e("CameraPreview", "Frame processing failed", e)
                             } finally {
                                 imageProxy.close()
                             }
@@ -294,15 +299,14 @@ fun CameraPreview(
                     Log.e("CameraPreview", "Use case binding failed", exc)
                 }
             }, ContextCompat.getMainExecutor(ctx))
+
             previewView
         },
         modifier = Modifier.fillMaxSize()
     )
 
     DisposableEffect(Unit) {
-        onDispose {
-            analyzerExecutor.shutdown()
-        }
+        onDispose { analyzerExecutor.shutdown() }
     }
 }
 
