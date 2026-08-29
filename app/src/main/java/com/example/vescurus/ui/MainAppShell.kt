@@ -179,11 +179,12 @@ private fun RoleSpecificCookScreen(
         }
         Role.COOK -> {
             val detections by connectionManager.latestDetections.collectAsState(initial = emptyList())
+            val latestFrame by connectionManager.latestFrame.collectAsState(initial = null)
             CookScreen(
                 status = connectionStatus,
                 diagnostics = diagnostics,
                 detections = detections,
-                frames = connectionManager.frames,
+                latestFrame = latestFrame,
                 viewModel = cookViewModel,
                 onSnapshot = connectionManager::sendSnapshotCommand
             )

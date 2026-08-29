@@ -16,24 +16,21 @@ import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.http.HttpMethod
 import io.ktor.server.application.install
-import io.ktor.server.cio.CIO as ServerCIO
 import io.ktor.server.engine.ApplicationEngine
 import io.ktor.server.engine.embeddedServer
+import io.ktor.server.netty.Netty
 import io.ktor.server.routing.routing
 import io.ktor.server.websocket.DefaultWebSocketServerSession
 import io.ktor.server.websocket.WebSockets
 import io.ktor.server.websocket.webSocket
 import io.ktor.websocket.Frame
-import io.ktor.websocket.readBytes
 import io.ktor.websocket.readText
 import io.ktor.websocket.send
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
@@ -81,15 +78,11 @@ class VescurusConnectionManager : ViewModel() {
     private val _latestDetections = MutableStateFlow<List<IngredientDetection>>(emptyList())
     val latestDetections: StateFlow<List<IngredientDetection>> = _latestDetections
 
-    /** Frames use a `SharedFlow` (replay=1, drop-oldest) so a slow collector
-     *  never holds onto a stale bitmap. `ByteArray` in `StateFlow` was
-     *  unstable — every push triggered whole-tree recomposition. */
-    private val _frames = MutableSharedFlow<ByteArray>(
-        replay = 1,
-        extraBufferCapacity = 0,
-        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST
-    )
-    val frames: SharedFlow<ByteArray> = _frames
+    // Matches the pre-rewrite wire pattern that was verified working:
+    // StateFlow<ByteArray?> with the latest JPEG bytes. Not a stable type,
+    // but the pipe is what matters here and this shape is proven end-to-end.
+    private val _latestFrame = MutableStateFlow<ByteArray?>(null)
+    val latestFrame: StateFlow<ByteArray?> = _latestFrame
 
     private var server: ApplicationEngine? = null
     private var client: HttpClient? = null
@@ -147,6 +140,7 @@ class VescurusConnectionManager : ViewModel() {
         _status.value = ConnectionStatus.IDLE
         _diagnostics.value = ""
         _latestDetections.value = emptyList()
+        _latestFrame.value = null
         currentRole = Role.NONE
         reconnectAttempt = 0
     }
@@ -154,8 +148,8 @@ class VescurusConnectionManager : ViewModel() {
     // --- SERVER (GUIDE) ---
     private fun startServer() {
         val port = findFreePort()
-        Log.d(TAG, "[WS] Starting CIO server on port $port")
-        server = embeddedServer(ServerCIO, port = port) {
+        Log.d(TAG, "[WS] Starting Netty server on port $port")
+        server = embeddedServer(Netty, port = port) {
             install(WebSockets) {
                 pingPeriodMillis = WS_PING_INTERVAL_MS
                 timeoutMillis = WS_TIMEOUT_MS
@@ -317,14 +311,7 @@ class VescurusConnectionManager : ViewModel() {
                             reachedFrameLoop = true
                             reconnectAttempt = 0  // reset backoff once we're actually receiving
                         }
-                        when (frame) {
-                            is Frame.Text -> handleClientText(frame.readText())
-                            is Frame.Binary -> {
-                                val bytes = frame.readBytes()
-                                if (bytes.isNotEmpty()) _frames.tryEmit(bytes)
-                            }
-                            else -> Unit
-                        }
+                        if (frame is Frame.Text) handleClientText(frame.readText())
                     }
                 }
             } catch (e: CancellationException) {
@@ -358,6 +345,15 @@ class VescurusConnectionManager : ViewModel() {
                     _latestDetections.value = payload.detections
                 }.onFailure {
                     Log.e(TAG, "[WS] Detection parse failed: ${it.message}")
+                }
+            }
+            text.startsWith(PREFIX_FRAME) -> {
+                runCatching {
+                    val base64 = text.removePrefix(PREFIX_FRAME)
+                    val bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+                    if (bytes.isNotEmpty()) _latestFrame.value = bytes
+                }.onFailure {
+                    Log.e(TAG, "[WS] Frame parse failed: ${it.message}")
                 }
             }
         }
@@ -428,8 +424,21 @@ class VescurusConnectionManager : ViewModel() {
         if (session != null && _status.value == ConnectionStatus.CONNECTED) {
             viewModelScope.launch(Dispatchers.IO) {
                 runCatching {
-                    // Frame.Binary — no base64 tax on the wire.
-                    session.send(Frame.Binary(true, bytes))
+                    // Text + base64 — matches the wire format the original
+                    // codebase used, which was verified working on real
+                    // devices. Frame.Binary would save ~33% bandwidth but
+                    // did not deliver reliably in this Ktor 2.3.12 + CIO
+                    // combo. Kept text-based so live video shows on the
+                    // Cook phone.
+                    // Base64.DEFAULT matches the original working code's
+                    // wire format exactly. NO_WRAP would be marginally
+                    // more compact but any wire-format tweak is a suspect
+                    // right now, so we mirror the original byte-for-byte.
+                    val base64 = android.util.Base64.encodeToString(
+                        bytes,
+                        android.util.Base64.DEFAULT
+                    )
+                    session.send(PREFIX_FRAME + base64)
                 }.onFailure { Log.e(TAG, "[WS] Frame broadcast failed: ${it.message}") }
             }
         }
@@ -462,6 +471,7 @@ class VescurusConnectionManager : ViewModel() {
         const val HANDSHAKE_OK = "VESCURUS_HANDSHAKE_OK|GUIDE-01"
         const val HANDSHAKE_FIN = "VESCURUS_HANDSHAKE_FIN|COOK-01"
         const val PREFIX_DETECTION = "DETECTION|"
+        const val PREFIX_FRAME = "FRAME|"
         const val CMD_TAKE_SNAPSHOT = "CMD_TAKE_SNAPSHOT"
 
         const val WS_PING_INTERVAL_MS = 15_000L

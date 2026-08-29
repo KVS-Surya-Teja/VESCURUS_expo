@@ -65,6 +65,7 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "/META-INF/INDEX.LIST"
+            excludes += "/META-INF/io.netty.versions.properties"
         }
     }
     testOptions {
@@ -100,10 +101,13 @@ dependencies {
     implementation(libs.ktor.client.serialization)
     implementation(libs.ktor.client.logging)
 
-    // Ktor server (CIO) — Guide peer. Netty engine dropped: heavier and unused features.
+    // Ktor server — Guide peer. Netty engine kept because CIO server in
+    // Ktor 2.3.x has known reliability issues with WebSocket text-frame
+    // delivery on Android; Netty is what the original working code used.
     implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.cio)
     implementation(libs.ktor.server.websockets)
+    implementation(libs.ktor.server.netty)
 
     // Gemini SDK — only one client, com.google.ai.client.generativeai.
     // firebase-ai dep dropped: was unused and duplicated the Gemini surface.

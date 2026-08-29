@@ -29,7 +29,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -45,17 +44,13 @@ import com.example.vescurus.ui.theme.AccentGreen
 import com.example.vescurus.ui.theme.GoldPrimary
 import com.example.vescurus.ui.theme.SurfaceCard
 import com.example.vescurus.ui.theme.SurfaceDeep
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.mapNotNull
 
 @Composable
 fun CookScreen(
     status: ConnectionStatus,
     diagnostics: String,
     detections: List<IngredientDetection>,
-    frames: SharedFlow<ByteArray>,
+    latestFrame: ByteArray?,
     viewModel: CookViewModel,
     onSnapshot: () -> Unit
 ) {
@@ -92,16 +87,9 @@ fun CookScreen(
         }
     }
 
-    // Decode JPEG bytes into an ImageBitmap on Dispatchers.Default — never
-    // on the composition thread. Old bitmaps become GC-eligible as soon as
-    // this state is replaced.
-    var videoBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
-    LaunchedEffect(frames) {
-        frames
-            .mapNotNull { bytes -> decodeFrame(bytes) }
-            .flowOn(Dispatchers.Default)
-            .collect { videoBitmap = it }
-    }
+    // Decode inline via `remember(latestFrame)`. This matches the original
+    // pattern that was verified working on real devices — trade the
+    // composition-thread decode cost for the reliability of a simple pipe.
 
     Column(modifier = Modifier.fillMaxSize().background(SurfaceDeep)) {
         Box(
@@ -111,13 +99,19 @@ fun CookScreen(
                 .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))
                 .background(Color.Black)
         ) {
-            if (videoBitmap != null) {
-                Image(
-                    bitmap = videoBitmap!!,
-                    contentDescription = "Guide Feed",
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
+            if (latestFrame != null) {
+                val bitmap = remember(latestFrame) {
+                    val opts = BitmapFactory.Options().apply { inSampleSize = 2 }
+                    BitmapFactory.decodeByteArray(latestFrame, 0, latestFrame.size, opts)
+                }
+                if (bitmap != null) {
+                    Image(
+                        bitmap = bitmap.asImageBitmap(),
+                        contentDescription = "Guide Feed",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                }
             } else {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
@@ -215,15 +209,6 @@ fun CookScreen(
             }
         }
     }
-}
-
-private fun decodeFrame(bytes: ByteArray): ImageBitmap? {
-    if (bytes.isEmpty()) return null
-    // Downsample: the video feed is displayed at half-screen height. Decoding
-    // at full resolution wastes memory and cycles.
-    val opts = BitmapFactory.Options().apply { inSampleSize = 2 }
-    val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: return null
-    return decoded.asImageBitmap()
 }
 
 @Composable
