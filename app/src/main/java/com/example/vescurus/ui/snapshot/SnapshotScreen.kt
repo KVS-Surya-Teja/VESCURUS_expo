@@ -69,7 +69,6 @@ import com.example.vescurus.ui.theme.AccentGreen
 import com.example.vescurus.ui.theme.GoldPrimary
 import com.example.vescurus.ui.theme.SurfaceCard
 import com.example.vescurus.ui.theme.SurfaceDeep
-import java.util.concurrent.Executors
 
 /**
  * Single-device capture → analyze → review flow. Fulfills spec items 1–9.
@@ -143,11 +142,13 @@ fun SnapshotScreen(
 private fun CameraCaptureView(onCaptured: (Bitmap) -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val executor = remember { Executors.newSingleThreadExecutor() }
+    // Use the main executor for takePicture callbacks so we can safely
+    // mutate Compose state (isCapturing) from onCaptureSuccess. Using a
+    // background executor was crashing on newer Compose versions because
+    // state writes off the main thread throw.
+    val mainExecutor = remember(context) { ContextCompat.getMainExecutor(context) }
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
     var isCapturing by remember { mutableStateOf(false) }
-
-    DisposableEffect(Unit) { onDispose { executor.shutdown() } }
 
     Box(modifier = Modifier.fillMaxSize()) {
         AndroidView(
@@ -203,18 +204,21 @@ private fun CameraCaptureView(onCaptured: (Bitmap) -> Unit) {
                 if (isCapturing) return@FloatingActionButton
                 isCapturing = true
                 capture.takePicture(
-                    executor,
+                    mainExecutor,
                     object : ImageCapture.OnImageCapturedCallback() {
                         override fun onCaptureSuccess(imageProxy: ImageProxy) {
-                            val bitmap = try {
+                            try {
                                 val raw = imageProxy.toBitmap()
                                 val rotation = imageProxy.imageInfo.rotationDegrees
-                                if (rotation == 0) raw else rotateBitmap(raw, rotation)
+                                val bitmap = if (rotation == 0) raw else rotateBitmap(raw, rotation)
+                                isCapturing = false
+                                onCaptured(bitmap)
+                            } catch (e: Exception) {
+                                Log.e(TAG, "onCaptureSuccess processing failed", e)
+                                isCapturing = false
                             } finally {
                                 imageProxy.close()
                             }
-                            isCapturing = false
-                            onCaptured(bitmap)
                         }
 
                         override fun onError(exception: ImageCaptureException) {

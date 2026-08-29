@@ -456,10 +456,11 @@ class VescurusConnectionManager : ViewModel() {
         }
     }
 
-    override fun onCleared() {
-        stop()
-        super.onCleared()
-    }
+    // Note: NOT overriding onCleared. The original code relied on the
+    // MainAppShell's DisposableEffect { onDispose { stop() } } to teardown.
+    // Adding an onCleared stop() (as I originally did in the rewrite) was
+    // a suspect for over-eager connection teardown, so it's removed to
+    // match the pre-rewrite lifecycle behavior exactly.
 
     private fun findFreePort(): Int = ServerSocket(0).use { it.localPort }
 
