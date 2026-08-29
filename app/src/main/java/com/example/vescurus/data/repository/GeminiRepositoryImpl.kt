@@ -16,29 +16,56 @@ class GeminiRepositoryImpl : IngredientRepository {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     private val prompt = """
-        You are the visual ingredient recognition engine of VESCURUS.
-        Analyze the image and identify cooking ingredients.
-        
-        URGENT RULE FOR EGGS:
-        Treat ANY white or off-white round/oval object as an "egg". 
-        This includes raw eggs in shell, boiled eggs, peeled eggs, and even white/off-white spherical props (like a ping pong ball or white paper ball). 
-
-        Return ONLY valid JSON:
+        You are the visual ingredient recognition engine for the VESCURUS 
+        cooking assistant.
+    
+        IDENTIFICATION RULE:
+        Detect any white or off-white round/oval objects and classify 
+        them as "egg". 
+        This includes raw eggs, boiled eggs, peeled eggs, or even white 
+        spherical props (like a ping pong ball or white paper ball). 
+    
+        SUPPORTED INGREDIENTS:
+        - egg
+        - onion
+        - tomato
+        - banana
+        - flour
+        - salt
+        - black pepper
+        - oil
+        - butter
+        - milk
+        - turmeric powder
+        - red chilli powder
+    
+        IGNORE (NEUTRAL):
+        - cookware (tawa, pan, stove), utensils (spatula, spoon), 
+          hands, fingers, steam, smoke, background objects.
+    
+        Return ONLY valid JSON in this structure:
         {
-          "request_id": "string",
+          "request_id": "v0",
           "detections": [
             {
-              "id": "string",
-              "label": "string",
-              "confidence": number (0-1),
-              "box_2d": {"ymin": float, "xmin": float, "ymax": float, "xmax": float},
-              "alternatives": [{"label": "string", "confidence": float}],
-              "is_supported": boolean
+              "id": "obj-1",
+              "label": "egg",
+              "confidence": 0.96,
+              "box_2d": {
+                "ymin": 0.20,
+                "xmin": 0.30,
+                "ymax": 0.70,
+                "xmax": 0.65
+              },
+              "alternatives": [],
+              "is_supported": true
             }
           ],
-          "overall_confidence": number
+          "overall_confidence": 0.96
         }
-        Use normalized coordinates (0-1) for box_2d.
+    
+        If nothing is found, return empty detections list.
+        Use normalized coordinates (0.0 to 1.0) for box_2d.
     """.trimIndent()
 
     override suspend fun analyzeIngredients(rawBitmap: Bitmap, scaledBitmap: Bitmap): AnalysisResponse = withContext(Dispatchers.IO) {

@@ -15,11 +15,20 @@ class GeminiIngredientDetector : IngredientDetector {
         
         return when (result) {
             is AnalyzeImageUseCase.Result.Success -> {
+                Log.d(
+                    "CV_FLOW",
+                    "Gemini parsed ${result.data.detections.size} detections: " +
+                            result.data.detections.joinToString {
+                                "${it.label}=${it.confidence} " +
+                                        "box=${it.box_2d}"
+                            }
+                )
+
                 result.data.detections.map { det ->
                     DetectionResult(
                         label = det.label,
                         confidence = det.confidence,
-                        recipe_class = deriveRecipeClass(det.label), 
+                        recipe_class = 0, // V0: Recipe selection is handled in UI/Chatbot after detection
                         box_2d = LegacyBoundingBox(
                             det.box_2d.ymin,
                             det.box_2d.xmin,
@@ -31,18 +40,12 @@ class GeminiIngredientDetector : IngredientDetector {
                 }
             }
             is AnalyzeImageUseCase.Result.Failure -> {
-                Log.e("CV_FLOW", "Analysis failure: ${result.message}")
+                Log.e(
+                    "CV_FLOW",
+                    "Gemini detection failure: ${result.message}"
+                )
                 emptyList()
             }
-        }
-    }
-
-    private fun deriveRecipeClass(label: String): Int {
-        return when (label.lowercase()) {
-            "egg" -> 2 // Scrambled Eggs for demo
-            "onion", "tomato" -> 1 // Omelette
-            "banana", "flour" -> 4 // Pancake
-            else -> 0
         }
     }
 }

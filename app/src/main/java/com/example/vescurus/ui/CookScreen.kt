@@ -33,7 +33,6 @@ import com.example.vescurus.model.DetectionResult
 import com.example.vescurus.model.EGG_RECIPES
 import com.example.vescurus.model.Recipe
 import com.example.vescurus.model.canonicalizeIngredientLabel
-import com.example.vescurus.model.deriveRecipeClass
 import com.example.vescurus.network.ConnectionStatus
 
 @Composable
@@ -46,14 +45,15 @@ fun CookScreen(
     onSnapshot: () -> Unit
 ) {
     var isVisionHudEnabled by remember { mutableStateOf(true) }
-    val detectedClass = remember(detections) { deriveDetectedRecipeClass(detections) }
-    val shouldOpenRecipeSelection = detections.any {
-        canonicalizeIngredientLabel(it.label) == "egg" || detectedClass in 1..4
+
+    val eggDetected = detections.any {
+        canonicalizeIngredientLabel(it.label) == "egg" &&
+                it.confidence >= 0.70f &&
+                it.supported
     }
-    
-    // Auto-trigger recipe selection when egg is first seen and we are idle
-    LaunchedEffect(shouldOpenRecipeSelection) {
-        if (shouldOpenRecipeSelection && viewModel.cookingState == CookingState.IDLE) {
+
+    LaunchedEffect(eggDetected) {
+        if (eggDetected && viewModel.cookingState == CookingState.IDLE) {
             viewModel.startRecipeSelection()
         }
     }
@@ -183,7 +183,7 @@ fun CookScreen(
                         }
                     }
                     CookingState.RECIPE_SELECTION -> {
-                        RecipeSelectionView(viewModel, detections, detectedClass)
+                        RecipeSelectionView(viewModel, detections)
                     }
                     CookingState.COUNTDOWN, CookingState.COOKING -> {
                         CookingActiveWorkflow(viewModel)
@@ -201,17 +201,21 @@ fun CookScreen(
 }
 
 @Composable
-fun RecipeSelectionView(viewModel: CookViewModel, detections: List<DetectionResult>, detectedClass: Int) {
+fun RecipeSelectionView(viewModel: CookViewModel, detections: List<DetectionResult>) {
+    val eggDetected = detections.any { 
+        canonicalizeIngredientLabel(it.label) == "egg" && it.confidence >= 0.7f 
+    }
+    
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text(
-            text = if (detectedClass > 0) "INGREDIENT DETECTED" else "NO INGREDIENTS YET",
+            text = if (eggDetected) "EGG DETECTED" else "NO INGREDIENTS YET",
             color = GoldPrimary,
             fontSize = 12.sp,
             fontWeight = FontWeight.Black,
             letterSpacing = 2.sp
         )
         Text(
-            text = if (detectedClass > 0) "What would you like to cook?" else "Scan ingredients to see recipes...",
+            text = if (eggDetected) "What would you like to cook?" else "Scan ingredients to see recipes...",
             color = Color.White,
             fontSize = 22.sp,
             fontWeight = FontWeight.Bold,
@@ -223,11 +227,9 @@ fun RecipeSelectionView(viewModel: CookViewModel, detections: List<DetectionResu
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             items(EGG_RECIPES) { recipe ->
-                val isSuggested = recipe.categoryClass == detectedClass
                 RecipeSelectionCard(
                     recipe = recipe,
                     isSelected = viewModel.selectedRecipe?.id == recipe.id,
-                    isSuggested = isSuggested,
                     onClick = { viewModel.selectRecipe(recipe) }
                 )
             }
@@ -246,51 +248,25 @@ fun RecipeSelectionView(viewModel: CookViewModel, detections: List<DetectionResu
     }
 }
 
-private fun deriveDetectedRecipeClass(detections: List<DetectionResult>): Int {
-    val labelBasedClass = deriveRecipeClass(
-        detections.mapNotNull { canonicalizeIngredientLabel(it.label) }
-    )
-    if (labelBasedClass != 0) {
-        return labelBasedClass
-    }
-    return detections.firstOrNull { it.recipe_class in 1..4 }?.recipe_class ?: 0
-}
 
 @Composable
-fun RecipeSelectionCard(recipe: Recipe, isSelected: Boolean, isSuggested: Boolean, onClick: () -> Unit) {
+fun RecipeSelectionCard(recipe: Recipe, isSelected: Boolean, onClick: () -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth().clickable { onClick() },
-        color = if (isSelected) Color(0xFF14532D) else if (isSuggested) Color(0xFF1E293B).copy(alpha = 0.8f) else Color(0xFF1E293B),
+        color = if (isSelected) Color(0xFF14532D) else Color(0xFF1E293B),
         shape = RoundedCornerShape(16.dp),
-        border = if (isSelected) BorderStroke(2.dp, Color(0xFF22C55E)) else if (isSuggested) BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.5f)) else null
+        border = if (isSelected) BorderStroke(2.dp, Color(0xFF22C55E)) else null
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box {
-                Image(
-                    painter = painterResource(id = recipe.thumbnail),
-                    contentDescription = null,
-                    modifier = Modifier.size(64.dp).clip(RoundedCornerShape(10.dp)),
-                    contentScale = ContentScale.Crop
-                )
-                if (isSuggested) {
-                    Surface(
-                        color = GoldPrimary,
-                        shape = RoundedCornerShape(4.dp),
-                        modifier = Modifier.align(Alignment.TopStart).padding(4.dp)
-                    ) {
-                        Text(
-                            text = "SUGGESTED",
-                            color = Color.Black,
-                            fontSize = 8.sp,
-                            fontWeight = FontWeight.Black,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-            }
+            Image(
+                painter = painterResource(id = recipe.thumbnail),
+                contentDescription = null,
+                modifier = Modifier.size(64.dp).clip(RoundedCornerShape(10.dp)),
+                contentScale = ContentScale.Crop
+            )
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
