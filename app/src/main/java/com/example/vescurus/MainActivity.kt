@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 
+import com.example.vescurus.debug.VescurusLogger
 import com.example.vescurus.model.Role
 import com.example.vescurus.ui.MainAppShell
 import com.example.vescurus.ui.RoleSelectionScreen
@@ -34,6 +35,7 @@ val TextWhite = Color(0xFFFFFFFF)
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        VescurusLogger.initSession(this)
         setContent {
             VESCURUSApp()
         }

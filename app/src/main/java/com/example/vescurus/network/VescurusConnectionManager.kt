@@ -307,6 +307,7 @@ class VescurusConnectionManager : ViewModel() {
                                         val data = text.removePrefix(PREFIX_DETECTION)
                                         val response = json.decodeFromString<DetectionResponse>(data)
                                         _latestDetections.value = response.detections
+                                        Log.d(TAG, "[WS] Cook received ${response.detections.size} detections")
                                     } catch (e: Exception) {
                                         Log.e(TAG, "[WS] Failed to parse detection: ${e.message}")
                                     }

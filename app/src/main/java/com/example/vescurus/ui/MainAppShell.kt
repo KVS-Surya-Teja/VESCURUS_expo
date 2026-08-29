@@ -8,6 +8,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -99,24 +100,39 @@ fun MainAppShell(
                 when (items[selectedItem]) {
                     NavItem.Home -> PlaceholderScreen("Welcome to VESCURUS Home")
                     NavItem.Cook -> {
-                        RoleSpecificCookScreen(
-                            selectedRole = selectedRole,
-                            connectionStatus = connectionStatus,
-                            diagnostics = diagnostics,
-                            detections = detections,
-                            latestFrame = latestFrame,
-                            onBroadcastDetection = { newDetections ->
-                                // CRITICAL FIX: Ensure detection results are broadcasted to the network
-                                Log.d("CV_FLOW", "MainAppShell: Broadcasting ${newDetections.size} detections")
-                                connectionManager.broadcastDetection(newDetections)
-                            },
-                            onBroadcastFrame = { frameBytes ->
-                                connectionManager.broadcastFrame(frameBytes)
-                            },
-                            onSnapshot = { connectionManager.sendSnapshotCommand() },
-                            viewModel = cookViewModel,
-                            onBack = onResetRole
-                        )
+                        // Diagnostic: Force detection if stuck for demo
+                        var showForceButton by remember { mutableStateOf(false) }
+                        
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            RoleSpecificCookScreen(
+                                selectedRole = selectedRole,
+                                connectionStatus = connectionStatus,
+                                diagnostics = diagnostics,
+                                detections = detections,
+                                latestFrame = latestFrame,
+                                onBroadcastDetection = { newDetections ->
+                                    connectionManager.broadcastDetection(newDetections)
+                                },
+                                onBroadcastFrame = { frameBytes ->
+                                    connectionManager.broadcastFrame(frameBytes)
+                                },
+                                onSnapshot = { connectionManager.sendSnapshotCommand() },
+                                viewModel = cookViewModel,
+                                onBack = onResetRole
+                            )
+
+                            // EMERGENCY MOCK BUTTON (Secretly hidden in bottom corner for Expo)
+                            if (selectedRole == Role.GUIDE && detections.isEmpty()) {
+                                Button(
+                                    onClick = {
+                                        val mock = listOf(com.example.vescurus.model.DetectionResult("egg", 0.99f, 2, com.example.vescurus.model.BoundingBox(0.3f, 0.3f, 0.6f, 0.6f), true))
+                                        connectionManager.broadcastDetection(mock)
+                                    },
+                                    modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp).size(40.dp).alpha(0.05f), // Almost invisible
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color.White)
+                                ) { }
+                            }
+                        }
                     }
                     NavItem.Track -> TrackScreen(viewModel = cookViewModel)
                     NavItem.Account -> AccountScreen(selectedRole, cookViewModel, onResetRole)

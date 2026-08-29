@@ -4,5 +4,5 @@ import android.graphics.Bitmap
 import com.example.vescurus.model.DetectionResult
 
 interface IngredientDetector {
-    suspend fun detect(bitmap: Bitmap): List<DetectionResult>
+    suspend fun detect(rawBitmap: Bitmap, scaledBitmap: Bitmap): List<DetectionResult>
 }

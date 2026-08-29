@@ -29,6 +29,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.vescurus.GoldPrimary
+import com.example.vescurus.debug.VescurusLogger
 import com.example.vescurus.detector.GeminiIngredientDetector
 import com.example.vescurus.model.DetectionResult
 import com.example.vescurus.network.ConnectionStatus
@@ -260,7 +261,7 @@ fun CameraPreview(
                                     scope.launch(Dispatchers.IO) {
                                         try {
                                             Log.d("CV_FLOW", "Starting Gemini inference...")
-                                            val results = detector.detect(scaledBitmap)
+                                            val results = detector.detect(uprightBitmap, scaledBitmap)
                                             launch(Dispatchers.Main) {
                                                 onDetectionsUpdated(results)
                                             }
