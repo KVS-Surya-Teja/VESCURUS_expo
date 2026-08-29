@@ -11,11 +11,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.vescurus.GoldPrimary
+import com.example.vescurus.model.EGG_RECIPES
+import com.example.vescurus.ui.theme.GoldPrimary
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun TrackScreen(viewModel: CookViewModel) {
@@ -47,54 +50,92 @@ fun TrackScreen(viewModel: CookViewModel) {
                 Text(
                     text = "No cooking sessions recorded yet.\nComplete a recipe to track macros!",
                     color = Color.Gray,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    textAlign = TextAlign.Center,
                     fontSize = 14.sp
                 )
             }
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(history.reversed()) { item ->
-                    Surface(
-                        color = Color(0xFF1E293B),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    text = item.recipeName,
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp
-                                )
-                                Text(
-                                    text = "${item.calories} kcal",
-                                    color = GoldPrimary,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(6.dp))
-                            val dateStr = remember(item.timestamp) {
-                                SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date(item.timestamp))
-                            }
-                            Text(text = dateStr, color = Color.Gray, fontSize = 11.sp)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(text = "🥩 Protein: ${item.proteinG}g", color = Color(0xFF93C5FD), fontSize = 12.sp)
-                                Text(text = "🍞 Carbs: ${item.carbsG}g", color = Color(0xFFFDE047), fontSize = 12.sp)
-                                Text(text = "🥑 Fats: ${item.fatsG}g", color = Color(0xFF86EFAC), fontSize = 12.sp)
-                            }
-                        }
+                items(history, key = { it.id }) { item ->
+                    val micros = remember(item.recipeId) {
+                        EGG_RECIPES.find { it.id == item.recipeId }?.micros.orEmpty()
                     }
+                    HistoryRow(item = item, micros = micros)
                 }
             }
         }
     }
+}
+
+@Composable
+private fun HistoryRow(item: com.example.vescurus.model.CookHistoryItem, micros: String) {
+    Surface(
+        color = Color(0xFF1E293B),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = item.recipeName,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    modifier = Modifier.weight(1f).padding(end = 8.dp)
+                )
+                Text(
+                    text = "${item.calories} kcal",
+                    color = GoldPrimary,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                )
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            val dateStr = remember(item.timestamp) {
+                SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault())
+                    .format(Date(item.timestamp))
+            }
+            Text(text = dateStr, color = Color.Gray, fontSize = 11.sp)
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                MacroChip("Protein", "${item.proteinG.trimZero()} g", Color(0xFF93C5FD))
+                MacroChip("Carbs", "${item.carbsG.trimZero()} g", Color(0xFFFDE047))
+                MacroChip("Fats", "${item.fatsG.trimZero()} g", Color(0xFF86EFAC))
+            }
+            if (micros.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = "MICROS",
+                    color = GoldPrimary.copy(alpha = 0.7f),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.5.sp
+                )
+                Text(
+                    text = micros,
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontSize = 12.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MacroChip(label: String, value: String, color: Color) {
+    Column {
+        Text(text = label.uppercase(), color = Color.Gray, fontSize = 9.sp, letterSpacing = 1.sp)
+        Text(text = value, color = color, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+private fun Float.trimZero(): String {
+    val i = this.toInt()
+    return if (this == i.toFloat()) i.toString() else "%.1f".format(this)
 }

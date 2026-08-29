@@ -2,50 +2,34 @@ package com.example.vescurus.detector
 
 import android.graphics.Bitmap
 import android.util.Log
-import com.example.vescurus.di.AppModule
+import com.example.vescurus.domain.model.IngredientDetection
 import com.example.vescurus.domain.usecase.AnalyzeImageUseCase
-import com.example.vescurus.model.DetectionResult
-import com.example.vescurus.model.BoundingBox as LegacyBoundingBox
 
-class GeminiIngredientDetector : IngredientDetector {
-    private val useCase = AppModule.analyzeImageUseCase
+/**
+ * Adapter over [AnalyzeImageUseCase]. On failure returns an empty list —
+ * upstream `GuideScreen` interprets that as a transient miss and only clears
+ * boxes after N consecutive misses (see the two-miss debounce there).
+ *
+ * The dependency is passed explicitly so this class is trivially test-double-able.
+ */
+class GeminiIngredientDetector(private val useCase: AnalyzeImageUseCase) : IngredientDetector {
 
-    override suspend fun detect(rawBitmap: Bitmap, scaledBitmap: Bitmap): List<DetectionResult> {
-        val result = useCase.execute(rawBitmap, scaledBitmap)
-        
-        return when (result) {
+    override suspend fun detect(rawBitmap: Bitmap, scaledBitmap: Bitmap): List<IngredientDetection> {
+        return when (val result = useCase.execute(rawBitmap, scaledBitmap)) {
             is AnalyzeImageUseCase.Result.Success -> {
-                Log.d(
-                    "CV_FLOW",
-                    "Gemini parsed ${result.data.detections.size} detections: " +
-                            result.data.detections.joinToString {
-                                "${it.label}=${it.confidence} " +
-                                        "box=${it.box_2d}"
-                            }
-                )
-
-                result.data.detections.map { det ->
-                    DetectionResult(
-                        label = det.label,
-                        confidence = det.confidence,
-                        recipe_class = 0, // V0: Recipe selection is handled in UI/Chatbot after detection
-                        box_2d = LegacyBoundingBox(
-                            det.box_2d.ymin,
-                            det.box_2d.xmin,
-                            det.box_2d.ymax,
-                            det.box_2d.xmax
-                        ),
-                        supported = det.is_supported
-                    )
-                }
+                Log.d(TAG, "Detected ${result.data.detections.size}: ${
+                    result.data.detections.joinToString { "${it.label}=${it.confidence}" }
+                }")
+                result.data.detections
             }
             is AnalyzeImageUseCase.Result.Failure -> {
-                Log.e(
-                    "CV_FLOW",
-                    "Gemini detection failure: ${result.message}"
-                )
+                Log.w(TAG, "Detection failed: ${result.message}")
                 emptyList()
             }
         }
+    }
+
+    private companion object {
+        const val TAG = "GeminiDetector"
     }
 }

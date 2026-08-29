@@ -12,46 +12,42 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.delay
-
-import com.example.vescurus.debug.VescurusLogger
 import com.example.vescurus.model.Role
 import com.example.vescurus.ui.MainAppShell
 import com.example.vescurus.ui.RoleSelectionScreen
-
-// Brand Theme Colors
-val GoldPrimary = Color(0xFFFFB800)
-val BlackBackground = Color(0xFF000000)
-val TextWhite = Color(0xFFFFFFFF)
+import com.example.vescurus.ui.theme.BlackBackground
+import com.example.vescurus.ui.theme.GoldPrimary
+import com.example.vescurus.ui.theme.TextWhite
+import com.example.vescurus.ui.theme.VESCURUSTheme
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        VescurusLogger.initSession(this)
         setContent {
-            VESCURUSApp()
+            VESCURUSTheme {
+                VESCURUSApp()
+            }
         }
     }
 }
 
-enum class Screen {
-    Splash,
-    RoleSelection,
-    MainApp
-}
+private enum class Screen { Splash, RoleSelection, MainApp }
 
 @Composable
-fun VESCURUSApp() {
-    var currentScreen by remember { mutableStateOf(Screen.Splash) }
-    var selectedRole by remember { mutableStateOf(Role.NONE) }
+private fun VESCURUSApp() {
+    // rememberSaveable so rotation/process death does not send us back
+    // to Splash + reset the selected role.
+    var currentScreen by rememberSaveable { mutableStateOf(Screen.Splash) }
+    var selectedRole by rememberSaveable { mutableStateOf(Role.NONE) }
 
     Crossfade(
         targetState = currentScreen,
@@ -59,8 +55,9 @@ fun VESCURUSApp() {
         label = "ScreenTransition"
     ) { screen ->
         when (screen) {
-            Screen.Splash -> SplashScreen(onTimeout = { 
-                currentScreen = if (selectedRole == Role.NONE) Screen.RoleSelection else Screen.MainApp 
+            Screen.Splash -> SplashScreen(onTimeout = {
+                currentScreen =
+                    if (selectedRole == Role.NONE) Screen.RoleSelection else Screen.MainApp
             })
             Screen.RoleSelection -> RoleSelectionScreen(onRoleSelected = { role ->
                 selectedRole = role
@@ -78,67 +75,64 @@ fun VESCURUSApp() {
 }
 
 @Composable
-fun SplashScreen(onTimeout: () -> Unit) {
+private fun SplashScreen(onTimeout: () -> Unit) {
     var startAnimation by remember { mutableStateOf(false) }
     val alphaAnim by animateFloatAsState(
         targetValue = if (startAnimation) 1f else 0f,
-        animationSpec = tween(durationMillis = 1000),
+        animationSpec = tween(durationMillis = 1_000),
         label = "AlphaAnimation"
     )
     val scaleAnim by animateFloatAsState(
         targetValue = if (startAnimation) 1f else 0.8f,
-        animationSpec = tween(durationMillis = 1000),
+        animationSpec = tween(durationMillis = 1_000),
         label = "ScaleAnimation"
     )
 
     LaunchedEffect(Unit) {
         startAnimation = true
-        delay(2500)
+        delay(2_500L)
         onTimeout()
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(BlackBackground),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-            modifier = Modifier.graphicsLayer(
-                alpha = alphaAnim,
-                scaleX = scaleAnim,
-                scaleY = scaleAnim
-            )
+    Surface(color = BlackBackground) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(BlackBackground),
+            contentAlignment = Alignment.Center
         ) {
-            Image(
-                painter = painterResource(id = R.drawable.ic_vescurus_logo),
-                contentDescription = "VESCURUS Logo",
-                modifier = Modifier
-                    .size(220.dp)
-                    .padding(16.dp)
-            )
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Text(
-                text = "VESCURUS",
-                color = GoldPrimary,
-                fontSize = 32.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 4.sp
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = "Smart Cooking System",
-                color = TextWhite.copy(alpha = 0.7f),
-                fontSize = 14.sp,
-                letterSpacing = 1.sp
-            )
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.graphicsLayer(
+                    alpha = alphaAnim,
+                    scaleX = scaleAnim,
+                    scaleY = scaleAnim
+                )
+            ) {
+                Image(
+                    painter = painterResource(id = R.drawable.ic_vescurus_logo),
+                    contentDescription = "VESCURUS Logo",
+                    modifier = Modifier
+                        .size(220.dp)
+                        .padding(16.dp)
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                Text(
+                    text = "VESCURUS",
+                    color = GoldPrimary,
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 4.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Smart Cooking System",
+                    color = TextWhite.copy(alpha = 0.7f),
+                    fontSize = 14.sp,
+                    letterSpacing = 1.sp
+                )
+            }
         }
     }
 }
-

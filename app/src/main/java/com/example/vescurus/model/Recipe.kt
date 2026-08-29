@@ -10,82 +10,137 @@ data class RecipeStep(
     val ttsPrompt: String? = null
 )
 
+/**
+ * Scripted chatbot beat — an AI-authored coaching message that appears in
+ * the chat panel when the cook timer crosses [atMs]. Independent of the
+ * step announcements so we can time cheerleading/warnings independently of
+ * when a new step starts.
+ */
+data class ScriptedChatBeat(
+    val atMs: Long,
+    val text: String
+)
+
 data class Recipe(
     val id: String,
-    val categoryClass: Int, // 1: Omelette, 2: Scramble, 3: Sunny-Side, 4: Pancake
+    val categoryClass: Int, // 1: Omelette, 2: Scramble
     val name: String,
     val description: String,
     @DrawableRes val thumbnail: Int,
     val totalTimeMs: Long,
     val steps: List<RecipeStep>,
+    val chatBeats: List<ScriptedChatBeat> = emptyList(),
     val calories: Int,
     val proteinG: Float,
     val carbsG: Float,
-    val fatsG: Float
+    val fatsG: Float,
+    /** Free-text "micros" line for the Track screen — decorative for the demo. */
+    val micros: String = ""
 )
 
 val EGG_RECIPES = listOf(
     Recipe(
         id = "omelette",
         categoryClass = 1,
-        name = "Street-Style Tomato Pepper Omelette",
-        description = "A classic spicy and soft omelette.",
+        name = "Street-Style Onion & Chili Omelette",
+        description = "Frothy 2-egg omelette with onions, green chili, coriander, and warm spices.",
         thumbnail = R.drawable.omelette,
-        totalTimeMs = 210000L, // 3.5 mins
+        totalTimeMs = 270_000L, // 4:30
         steps = listOf(
-            RecipeStep(0, 30000, "Heat 1 tsp oil/butter in a tawa on medium heat.", "Heat one teaspoon of oil or butter in a pan on medium heat."),
-            RecipeStep(30000, 90000, "Add 2 tbsp finely chopped onions & saute until translucent.", "Add two tablespoons of chopped onions and saute them until they are translucent."),
-            RecipeStep(90000, 120000, "Add 2 tbsp chopped tomatoes & cook until soft.", "Add two tablespoons of chopped tomatoes and cook until they soften."),
-            RecipeStep(120000, 150000, "Pour 2 whisked eggs evenly over the sautéed vegetables.", "Pour two whisked eggs evenly over the sautéed vegetables."),
-            RecipeStep(150000, 210000, "Sprinkle a pinch of salt & black pepper on top, flip once set, and serve.", "Sprinkle salt and black pepper, flip it once it's set, and you're ready to serve.")
+            RecipeStep(
+                0L, 30_000L,
+                "Crack 2–3 eggs into a bowl. Add 2 tbsp chopped onions, 1 chopped green chili, 1 tbsp coriander, a pinch of salt, pepper, and red chili powder. Whisk until frothy.",
+                "Crack the eggs, add onion, chili, coriander, salt, pepper, and chili powder. Whisk hard until frothy."
+            ),
+            RecipeStep(
+                30_000L, 90_000L,
+                "Turn the Glen tawa to medium-high. Wait until the green ready-light glows.",
+                "Preheat the tawa on medium high. Wait for the green ready light to come on."
+            ),
+            RecipeStep(
+                90_000L, 105_000L,
+                "Melt 1 tsp butter — or brush a light layer of oil — across the center of the plate.",
+                "Melt a teaspoon of butter across the center of the plate."
+            ),
+            RecipeStep(
+                105_000L, 135_000L,
+                "Pour the egg mixture into the center. Spread it into a neat, wide circle with a wooden spatula.",
+                "Pour the eggs into the center and spread them into a neat circle."
+            ),
+            RecipeStep(
+                135_000L, 225_000L,
+                "Turn the temperature down to medium-low. Cook 1–2 minutes until the edges lift and the top looks set.",
+                "Turn the heat down to medium low. Let it cook until the edges lift and the top is set."
+            ),
+            RecipeStep(
+                225_000L, 270_000L,
+                "Slide the bamboo spatula underneath. Flip carefully and cook the other side for 30–45 seconds.",
+                "Slide the spatula under, flip carefully, and cook the other side for thirty to forty five seconds."
+            )
         ),
-        calories = 240, proteinG = 14f, carbsG = 6f, fatsG = 18f
+        chatBeats = listOf(
+            ScriptedChatBeat(12_000L, "Whisk vigorously — the frothier the mix, the fluffier the omelette."),
+            ScriptedChatBeat(60_000L, "Wait for the green ready-light before you pour. Rushing the preheat is the #1 sticking cause."),
+            ScriptedChatBeat(115_000L, "Spread it thin and wide — the outer edges set fastest."),
+            ScriptedChatBeat(190_000L, "Watch the edges — when they curl and lift on their own, you're ready to flip."),
+            ScriptedChatBeat(245_000L, "Only 30 seconds on the second side. Overcooking dries it out.")
+        ),
+        calories = 240,
+        proteinG = 14f,
+        carbsG = 4f,
+        fatsG = 19f,
+        micros = "Vit B12 · Selenium · Choline · Vit A"
     ),
     Recipe(
         id = "scrambled",
         categoryClass = 2,
-        name = "Scrambled Eggs with Green Chilli & Onion",
-        description = "Soft curds with a spicy kick.",
+        name = "Soft Buttery Scrambled Eggs",
+        description = "Slow-folded scrambled eggs with butter, finished at 85 % on residual heat.",
         thumbnail = R.drawable.scrambled_eggs,
-        totalTimeMs = 90000L, // 1.5 mins
+        totalTimeMs = 180_000L, // 3:00
         steps = listOf(
-            RecipeStep(0, 30000, "Crack the eggs, and set it at dark setting for the heat", "Crack the eggs, and set it at dark setting for the heat."),
-            RecipeStep(30000, 40000, "Add salt & pepper", "Now add salt and pepper."),
-            RecipeStep(40000, 60000, "Scramble them", "Start scrambling them now."),
-            RecipeStep(60000, 90000, "Add onion & green chilli; stir until 1 min 30 sec and serve.", "Add onion and green chilli. Stir until one minute thirty seconds, then serve.")
+            RecipeStep(
+                0L, 30_000L,
+                "Crack 2 eggs into a bowl. Add 1 tbsp milk or cream (optional), a pinch of salt and pepper. Whisk hard for 30 seconds until frothy.",
+                "Crack two eggs. Add a splash of milk if using, plus salt and pepper. Whisk hard for thirty seconds."
+            ),
+            RecipeStep(
+                30_000L, 75_000L,
+                "Turn the Glen tawa to medium-low. Let it heat for 30–45 seconds.",
+                "Preheat the tawa on medium low for thirty to forty five seconds."
+            ),
+            RecipeStep(
+                75_000L, 90_000L,
+                "Drop 1 tbsp butter in the center. It should sizzle gently — not smoke.",
+                "Drop a tablespoon of butter in the center. It should sizzle, not smoke."
+            ),
+            RecipeStep(
+                90_000L, 105_000L,
+                "Pour the egg mix onto the hot plate. Let it sit UNTOUCHED for 5 seconds so a base forms.",
+                "Pour the eggs onto the plate. Let them sit untouched for five seconds."
+            ),
+            RecipeStep(
+                105_000L, 150_000L,
+                "Use a wooden or silicone spatula (never metal). Gently fold cooked egg from the edges to the center in slow, sweeping motions.",
+                "Fold gently from the edges to the center with slow sweeping motions."
+            ),
+            RecipeStep(
+                150_000L, 180_000L,
+                "When the eggs look glossy and about 85 % done, switch off the heat and scoop them off immediately. Residual heat finishes them.",
+                "Turn off the heat when the eggs look glossy and about eighty five percent done. Scoop them off immediately."
+            )
         ),
-        calories = 220, proteinG = 13f, carbsG = 4f, fatsG = 16f
-    ),
-    Recipe(
-        id = "sunny_side",
-        categoryClass = 3,
-        name = "Crispy Sunny Side-Up with Chili-Garlic Oil",
-        description = "Crispy edges with a rich chili-garlic infusion.",
-        thumbnail = R.drawable.sunny_side_up,
-        totalTimeMs = 180000L, // 3 mins
-        steps = listOf(
-            RecipeStep(0, 45000, "Add 1 tbsp oil and 1 tsp minced garlic; sizzle on low-medium until fragrant.", "Add one tablespoon of oil and one teaspoon of minced garlic. Sizzle on low medium until fragrant."),
-            RecipeStep(45000, 75000, "Add ½ tsp red chilli flakes directly into the hot oil.", "Add half a teaspoon of red chilli flakes directly into the hot oil."),
-            RecipeStep(75000, 150000, "Crack 1–2 eggs directly into the infused chili-garlic oil.", "Crack one or two eggs directly into the infused oil."),
-            RecipeStep(150000, 180000, "Spoon hot spiced oil over the egg whites to set them, season with salt, and plate.", "Spoon the hot spiced oil over the whites to set them, season with salt, and plate it.")
+        chatBeats = listOf(
+            ScriptedChatBeat(12_000L, "Frothy equals fluffy. Whisk hard for the full 30 seconds."),
+            ScriptedChatBeat(50_000L, "Medium-low only. High heat makes rubbery, tight scrambles."),
+            ScriptedChatBeat(95_000L, "Don't touch it yet — those 5 seconds let the base set."),
+            ScriptedChatBeat(125_000L, "Slow folds make big soft curds. Fast stirring makes small hard ones."),
+            ScriptedChatBeat(155_000L, "Turn the heat off NOW while they still look wet. They'll finish on the plate.")
         ),
-        calories = 260, proteinG = 12f, carbsG = 2f, fatsG = 22f
-    ),
-    Recipe(
-        id = "pancake",
-        categoryClass = 4,
-        name = "3-Ingredient Banana Tawa Pancake",
-        description = "Sweet, healthy, and easy pancakes.",
-        thumbnail = R.drawable.pancake,
-        totalTimeMs = 240000L, // 4 mins
-        steps = listOf(
-            RecipeStep(0, 60000, "Peel 1 ripe banana and mash thoroughly with a fork until smooth.", "Peel a ripe banana and mash it thoroughly with a fork until smooth."),
-            RecipeStep(60000, 105000, "Crack in 1 whole egg and whisk until fully blended into the mashed banana.", "Crack in one egg and whisk until fully blended into the banana."),
-            RecipeStep(105000, 135000, "Add 2 tbsp all-purpose / wheat flour and stir briefly until a thick batter forms.", "Add two tablespoons of flour and stir until a thick batter forms."),
-            RecipeStep(135000, 150000, "Grease the non-stick tawa with ½ tsp butter/oil on medium heat.", "Grease the pan with half a teaspoon of butter or oil on medium heat."),
-            RecipeStep(150000, 210000, "Pour the batter onto the center; cook until surface bubbles and edges firm up.", "Pour the batter onto the pan. Cook until bubbles form and the edges firm up."),
-            RecipeStep(210000, 240000, "Flip gently, cook the other side for 30–45 seconds until golden brown, and serve.", "Flip it gently, cook for another thirty to forty five seconds until golden brown, and serve.")
-        ),
-        calories = 310, proteinG = 8f, carbsG = 42f, fatsG = 12f
+        calories = 260,
+        proteinG = 13f,
+        carbsG = 1f,
+        fatsG = 22f,
+        micros = "Vit B12 · Vit D · Riboflavin · Choline"
     )
 )

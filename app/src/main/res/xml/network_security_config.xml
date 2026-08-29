@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Cleartext is permitted ONLY for the RFC1918 LAN ranges that the peer-to-peer
+    Guide↔Cook WebSocket runs over. Every other host (including generativelanguage.googleapis.com)
+    is HTTPS-only.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <!-- 10.0.0.0/8 -->
+        <domain includeSubdomains="true">10.0.0.0</domain>
+        <!-- 172.16.0.0/12 -->
+        <domain includeSubdomains="true">172.16.0.0</domain>
+        <!-- 192.168.0.0/16 -->
+        <domain includeSubdomains="true">192.168.0.0</domain>
+        <!-- Loopback (emulator / instrumentation) -->
+        <domain includeSubdomains="true">localhost</domain>
+    </domain-config>
+</network-security-config>

@@ -3,29 +3,47 @@ package com.example.vescurus.network
 import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
+import android.net.wifi.WifiManager
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.vescurus.BuildConfig
+import com.example.vescurus.domain.model.IngredientDetection
 import com.example.vescurus.model.Role
-import com.example.vescurus.model.DetectionResponse
-import com.example.vescurus.model.DetectionResult
-import io.ktor.client.*
-import io.ktor.client.engine.cio.*
-import io.ktor.client.plugins.websocket.*
-import io.ktor.http.*
-import io.ktor.server.application.*
-import io.ktor.server.engine.*
-import io.ktor.server.netty.*
-import io.ktor.server.routing.*
-import io.ktor.server.websocket.*
-import io.ktor.websocket.*
-import kotlinx.coroutines.*
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.cio.CIO
+import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
+import io.ktor.client.plugins.websocket.webSocket
+import io.ktor.http.HttpMethod
+import io.ktor.server.application.install
+import io.ktor.server.cio.CIO as ServerCIO
+import io.ktor.server.engine.ApplicationEngine
+import io.ktor.server.engine.embeddedServer
+import io.ktor.server.routing.routing
+import io.ktor.server.websocket.DefaultWebSocketServerSession
+import io.ktor.server.websocket.WebSockets
+import io.ktor.server.websocket.webSocket
+import io.ktor.websocket.Frame
+import io.ktor.websocket.readBytes
+import io.ktor.websocket.readText
+import io.ktor.websocket.send
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.serialization.encodeToString
+import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.net.ServerSocket
 import java.util.concurrent.atomic.AtomicBoolean
+
+/** Wire wrapper for detections. Kept tiny — just a `Serializable` list. */
+@Serializable
+data class DetectionWirePayload(val detections: List<IngredientDetection> = emptyList())
 
 enum class ConnectionStatus {
     IDLE,
@@ -38,28 +56,19 @@ enum class ConnectionStatus {
     LOST
 }
 
+/**
+ * Guide↔Cook peer transport.
+ *
+ * Guide runs an in-process Ktor CIO WebSocket server, advertises via mDNS.
+ * Cook discovers it via NSD, connects, hands back detections + JPEG frames.
+ *
+ * Video frames go over `Frame.Binary` — the previous `base64` text encoding
+ * cost +33% bandwidth and threw the binary allocation weight back to GC.
+ *
+ * Not yet: pairing secret, WSS, session id. Any peer on the same Wi-Fi that
+ * speaks the handshake becomes the Cook — flagged in the follow-up plan.
+ */
 class VescurusConnectionManager : ViewModel() {
-    private val TAG = "VescurusNet"
-    
-    /**
-     * EXPO NETWORKING STRATEGY:
-     * To bypass congested Expo Wi-Fi, the Guide should ideally enable its Mobile Hotspot.
-     * The Cook phone connects to this Hotspot. 
-     * P2P Telemetry (WebSockets) then runs entirely over the local Hotspot LAN.
-     * Only the Guide's Gemini API requests touch the public WAN.
-     */
-    private val SERVICE_TYPE = "_vescurus._tcp."
-    private val SERVICE_NAME = "VESCURUS-GUIDE"
-    private val HANDSHAKE_INIT = "VESCURUS_HANDSHAKE_INIT"
-    private val HANDSHAKE_OK = "VESCURUS_HANDSHAKE_OK|GUIDE-01"
-    private val HANDSHAKE_FIN = "VESCURUS_HANDSHAKE_FIN|COOK-01"
-    private val PREFIX_DETECTION = "DETECTION|"
-    private val PREFIX_FRAME = "FRAME|"
-    private val CMD_TAKE_SNAPSHOT = "CMD_TAKE_SNAPSHOT"
-
-    // Ktor constants
-    private val WS_PING_INTERVAL_MS = 15000L
-    private val WS_TIMEOUT_MS = 30000L
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -69,23 +78,30 @@ class VescurusConnectionManager : ViewModel() {
     private val _diagnostics = MutableStateFlow("")
     val diagnostics: StateFlow<String> = _diagnostics
 
-    private val _latestDetections = MutableStateFlow<List<DetectionResult>>(emptyList())
-    val latestDetections: StateFlow<List<DetectionResult>> = _latestDetections
+    private val _latestDetections = MutableStateFlow<List<IngredientDetection>>(emptyList())
+    val latestDetections: StateFlow<List<IngredientDetection>> = _latestDetections
 
-    private val _latestFrame = MutableStateFlow<ByteArray?>(null)
-    val latestFrame: StateFlow<ByteArray?> = _latestFrame
+    /** Frames use a `SharedFlow` (replay=1, drop-oldest) so a slow collector
+     *  never holds onto a stale bitmap. `ByteArray` in `StateFlow` was
+     *  unstable — every push triggered whole-tree recomposition. */
+    private val _frames = MutableSharedFlow<ByteArray>(
+        replay = 1,
+        extraBufferCapacity = 0,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST
+    )
+    val frames: SharedFlow<ByteArray> = _frames
 
-    private var server: NettyApplicationEngine? = null
+    private var server: ApplicationEngine? = null
     private var client: HttpClient? = null
     private var activeServerSession: DefaultWebSocketServerSession? = null
     private var activeClientSession: DefaultClientWebSocketSession? = null
     private var nsdManager: NsdManager? = null
     private var registrationListener: NsdManager.RegistrationListener? = null
     private var discoveryListener: NsdManager.DiscoveryListener? = null
+    private var multicastLock: WifiManager.MulticastLock? = null
 
     private var reconnectionJob: Job? = null
     private var reconnectAttempt = 0
-    private val maxReconnectDelay = 15000L
 
     private val isRunning = AtomicBoolean(false)
     private var currentRole: Role = Role.NONE
@@ -98,6 +114,7 @@ class VescurusConnectionManager : ViewModel() {
         currentRole = role
         Log.d(TAG, "Starting connection manager for role: $role")
         nsdManager = context.getSystemService(Context.NSD_SERVICE) as NsdManager
+        acquireMulticastLock(context)
 
         when (role) {
             Role.GUIDE -> startServer()
@@ -110,13 +127,25 @@ class VescurusConnectionManager : ViewModel() {
         Log.d(TAG, "Stopping connection manager")
         isRunning.set(false)
         reconnectionJob?.cancel()
-        server?.stop(1000, 2000)
+        reconnectionJob = null
+
+        // Shut down the server engine off the main thread — stop() blocks
+        // for up to `gracePeriodMillis` and would freeze the UI otherwise.
+        val serverToStop = server
+        server = null
+        if (serverToStop != null) {
+            viewModelScope.launch(Dispatchers.IO) {
+                runCatching { serverToStop.stop(500L, 1500L) }
+            }
+        }
+
         client?.close()
+        client = null
         unregisterService()
         stopDiscovery()
+        releaseMulticastLock()
         _status.value = ConnectionStatus.IDLE
         _diagnostics.value = ""
-        _latestFrame.value = null
         _latestDetections.value = emptyList()
         currentRole = Role.NONE
         reconnectAttempt = 0
@@ -125,39 +154,27 @@ class VescurusConnectionManager : ViewModel() {
     // --- SERVER (GUIDE) ---
     private fun startServer() {
         val port = findFreePort()
-        Log.d(TAG, "[WS] Starting Server on port $port")
-        server = embeddedServer(Netty, port = port) {
-            install(io.ktor.server.websocket.WebSockets) {
-                pingPeriod = java.time.Duration.ofMillis(WS_PING_INTERVAL_MS)
-                timeout = java.time.Duration.ofMillis(WS_TIMEOUT_MS)
-                maxFrameSize = Long.MAX_VALUE
+        Log.d(TAG, "[WS] Starting CIO server on port $port")
+        server = embeddedServer(ServerCIO, port = port) {
+            install(WebSockets) {
+                pingPeriodMillis = WS_PING_INTERVAL_MS
+                timeoutMillis = WS_TIMEOUT_MS
+                maxFrameSize = MAX_FRAME_SIZE_BYTES
                 masking = false
             }
             routing {
                 webSocket("/ws") {
-                    Log.d(TAG, "[WS] New connection received")
+                    Log.d(TAG, "[WS] New connection")
                     activeServerSession = this
                     try {
                         for (frame in incoming) {
-                            if (frame is Frame.Text) {
-                                val text = frame.readText()
-                                when {
-                                    text == HANDSHAKE_INIT -> {
-                                        Log.d(TAG, "[WS] Handshake received, sending OK")
-                                        send(HANDSHAKE_OK)
-                                    }
-                                    text.startsWith("VESCURUS_HANDSHAKE_FIN") -> {
-                                        _status.value = ConnectionStatus.CONNECTED
-                                        Log.d(TAG, "[WS] Handshake complete. Cook connected.")
-                                        _diagnostics.value = "Cook connected"
-                                    }
-                                    text == CMD_TAKE_SNAPSHOT -> {
-                                        Log.d(TAG, "[WS] Take Snapshot command received")
-                                        _diagnostics.value = "Snapshot captured!"
-                                    }
-                                }
+                            when (frame) {
+                                is Frame.Text -> handleServerText(frame.readText())
+                                else -> Unit
                             }
                         }
+                    } catch (e: CancellationException) {
+                        throw e
                     } catch (e: Exception) {
                         Log.e(TAG, "[WS] Server session error: ${e.message}")
                     } finally {
@@ -174,7 +191,25 @@ class VescurusConnectionManager : ViewModel() {
 
         registerService(port)
         _status.value = ConnectionStatus.SEARCHING
-        _diagnostics.value = "Ktor server: RUNNING\nListening on port: $port"
+        _diagnostics.value = "Listening on port $port"
+    }
+
+    private suspend fun DefaultWebSocketServerSession.handleServerText(text: String) {
+        when {
+            text == HANDSHAKE_INIT -> {
+                Log.d(TAG, "[WS] Handshake init received")
+                send(HANDSHAKE_OK)
+            }
+            text.startsWith("VESCURUS_HANDSHAKE_FIN") -> {
+                _status.value = ConnectionStatus.CONNECTED
+                _diagnostics.value = "Cook connected"
+                Log.d(TAG, "[WS] Handshake complete")
+            }
+            text == CMD_TAKE_SNAPSHOT -> {
+                Log.d(TAG, "[WS] Snapshot command received")
+                _diagnostics.value = "Snapshot captured"
+            }
+        }
     }
 
     private fun registerService(port: Int) {
@@ -185,28 +220,20 @@ class VescurusConnectionManager : ViewModel() {
         }
         registrationListener = object : NsdManager.RegistrationListener {
             override fun onServiceRegistered(nsdServiceInfo: NsdServiceInfo) {
-                Log.d(TAG, "[NSD] Service registered: ${nsdServiceInfo.serviceName}")
+                Log.d(TAG, "[NSD] Registered: ${nsdServiceInfo.serviceName}")
             }
             override fun onRegistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
                 Log.e(TAG, "[NSD] Registration failed: $errorCode")
             }
-            override fun onServiceUnregistered(serviceInfo: NsdServiceInfo) {
-                Log.d(TAG, "[NSD] Service unregistered")
-            }
-            override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
-                Log.e(TAG, "[NSD] Unregistration failed: $errorCode")
-            }
+            override fun onServiceUnregistered(serviceInfo: NsdServiceInfo) = Unit
+            override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) = Unit
         }
         nsdManager?.registerService(serviceInfo, NsdManager.PROTOCOL_DNS_SD, registrationListener)
     }
 
     private fun unregisterService() {
-        registrationListener?.let { 
-            try {
-                nsdManager?.unregisterService(it) 
-            } catch (e: Exception) {
-                Log.e(TAG, "[NSD] Error unregistering: ${e.message}")
-            }
+        registrationListener?.let {
+            runCatching { nsdManager?.unregisterService(it) }
         }
         registrationListener = null
     }
@@ -217,47 +244,27 @@ class VescurusConnectionManager : ViewModel() {
         _status.value = ConnectionStatus.SEARCHING
         _diagnostics.value = "Searching for Guide..."
         Log.d(TAG, "[NSD] Starting discovery for $SERVICE_TYPE")
-        
+
         stopDiscovery()
 
         discoveryListener = object : NsdManager.DiscoveryListener {
             override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
                 Log.e(TAG, "[NSD] Discovery start failed: $errorCode")
-                _diagnostics.value = "Discovery Failed: $errorCode"
+                _diagnostics.value = "Discovery failed: $errorCode"
                 nsdManager?.stopServiceDiscovery(this)
             }
             override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {
                 nsdManager?.stopServiceDiscovery(this)
             }
-            override fun onDiscoveryStarted(serviceType: String) {
-                Log.d(TAG, "[NSD] Discovery started")
-            }
-            override fun onDiscoveryStopped(serviceType: String) {
-                Log.d(TAG, "[NSD] Discovery stopped")
-            }
+            override fun onDiscoveryStarted(serviceType: String) = Unit
+            override fun onDiscoveryStopped(serviceType: String) = Unit
             override fun onServiceFound(serviceInfo: NsdServiceInfo) {
-                Log.d(TAG, "[NSD] Service found: ${serviceInfo.serviceName}")
                 if (serviceInfo.serviceType == SERVICE_TYPE && serviceInfo.serviceName == SERVICE_NAME) {
                     _status.value = ConnectionStatus.FOUND
-                    nsdManager?.resolveService(serviceInfo, object : NsdManager.ResolveListener {
-                        override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
-                            Log.e(TAG, "[NSD] Resolve failed: $errorCode")
-                            _diagnostics.value = "Resolve Failed: $errorCode"
-                        }
-                        override fun onServiceResolved(resolvedServiceInfo: NsdServiceInfo) {
-                            val hostAddress = resolvedServiceInfo.host?.hostAddress
-                            val port = resolvedServiceInfo.port
-                            if (hostAddress != null) {
-                                Log.d(TAG, "[NSD] Service resolved: $hostAddress:$port")
-                                _diagnostics.value = "Found Guide at $hostAddress:$port"
-                                connectToServer(hostAddress, port)
-                            }
-                        }
-                    })
+                    resolveAndConnect(serviceInfo)
                 }
             }
             override fun onServiceLost(serviceInfo: NsdServiceInfo) {
-                Log.d(TAG, "[NSD] Service lost: ${serviceInfo.serviceName}")
                 if (serviceInfo.serviceName == SERVICE_NAME) {
                     _diagnostics.value = "Guide unavailable"
                     if (_status.value == ConnectionStatus.CONNECTED) {
@@ -269,11 +276,26 @@ class VescurusConnectionManager : ViewModel() {
         nsdManager?.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
     }
 
+    private fun resolveAndConnect(serviceInfo: NsdServiceInfo) {
+        nsdManager?.resolveService(serviceInfo, object : NsdManager.ResolveListener {
+            override fun onResolveFailed(info: NsdServiceInfo, errorCode: Int) {
+                Log.e(TAG, "[NSD] Resolve failed: $errorCode")
+                _diagnostics.value = "Resolve failed: $errorCode"
+            }
+            override fun onServiceResolved(resolvedServiceInfo: NsdServiceInfo) {
+                val host = resolvedServiceInfo.host?.hostAddress ?: return
+                val port = resolvedServiceInfo.port
+                _diagnostics.value = "Found Guide at $host:$port"
+                connectToServer(host, port)
+            }
+        })
+    }
+
     private fun connectToServer(host: String, port: Int) {
         if (!isRunning.get()) return
         _status.value = ConnectionStatus.CONNECTING
         _diagnostics.value = "Connecting to $host:$port"
-        
+
         client?.close()
         client = HttpClient(CIO) {
             install(io.ktor.client.plugins.websocket.WebSockets) {
@@ -282,115 +304,120 @@ class VescurusConnectionManager : ViewModel() {
         }
 
         viewModelScope.launch(Dispatchers.IO) {
+            var reachedFrameLoop = false
             try {
-                Log.d(TAG, "[WS] Connecting to $host:$port/ws")
                 client?.webSocket(method = HttpMethod.Get, host = host, port = port, path = "/ws") {
-                    Log.d(TAG, "[WS] Connected. Starting handshake.")
+                    Log.d(TAG, "[WS] Connected. Handshaking.")
                     activeClientSession = this
                     _diagnostics.value = "Handshaking..."
                     send(HANDSHAKE_INIT)
-                    
-                    reconnectAttempt = 0
 
                     for (frame in incoming) {
-                        if (frame is Frame.Text) {
-                            val text = frame.readText()
-                            when {
-                                text.startsWith("VESCURUS_HANDSHAKE_OK") -> {
-                                    Log.d(TAG, "[WS] Handshake OK. Connected to Guide.")
-                                    send(HANDSHAKE_FIN)
-                                    _status.value = ConnectionStatus.CONNECTED
-                                    _diagnostics.value = "Connected to Guide"
-                                }
-                                text.startsWith(PREFIX_DETECTION) -> {
-                                    try {
-                                        val data = text.removePrefix(PREFIX_DETECTION)
-                                        val response = json.decodeFromString<DetectionResponse>(data)
-                                        _latestDetections.value = response.detections
-                                        Log.d(TAG, "[WS] Cook received ${response.detections.size} detections")
-                                    } catch (e: Exception) {
-                                        Log.e(TAG, "[WS] Failed to parse detection: ${e.message}")
-                                    }
-                                }
-                                text.startsWith(PREFIX_FRAME) -> {
-                                    try {
-                                        val base64 = text.removePrefix(PREFIX_FRAME)
-                                        val bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
-                                        _latestFrame.value = bytes
-                                    } catch (e: Exception) {
-                                        Log.e(TAG, "[WS] Failed to parse frame: ${e.message}")
-                                    }
-                                }
+                        if (!reachedFrameLoop) {
+                            reachedFrameLoop = true
+                            reconnectAttempt = 0  // reset backoff once we're actually receiving
+                        }
+                        when (frame) {
+                            is Frame.Text -> handleClientText(frame.readText())
+                            is Frame.Binary -> {
+                                val bytes = frame.readBytes()
+                                if (bytes.isNotEmpty()) _frames.tryEmit(bytes)
                             }
+                            else -> Unit
                         }
                     }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "[WS] Connection exception: ${e.message}")
                 _diagnostics.value = "Connection failed: ${e.message}"
-                handleDisconnection()
             } finally {
                 Log.d(TAG, "[WS] Client connection closed")
                 activeClientSession = null
-                if (isRunning.get() && _status.value != ConnectionStatus.RECONNECTING) {
-                    handleDisconnection()
+                // Single reconnect path — no double-scheduling from both
+                // catch and finally like the previous code did.
+                if (isRunning.get()) scheduleReconnect()
+            }
+        }
+    }
+
+    private suspend fun DefaultClientWebSocketSession.handleClientText(text: String) {
+        when {
+            text.startsWith("VESCURUS_HANDSHAKE_OK") -> {
+                Log.d(TAG, "[WS] Handshake OK")
+                send(HANDSHAKE_FIN)
+                _status.value = ConnectionStatus.CONNECTED
+                _diagnostics.value = "Connected to Guide"
+            }
+            text.startsWith(PREFIX_DETECTION) -> {
+                runCatching {
+                    val payload = json.decodeFromString<DetectionWirePayload>(
+                        text.removePrefix(PREFIX_DETECTION)
+                    )
+                    _latestDetections.value = payload.detections
+                }.onFailure {
+                    Log.e(TAG, "[WS] Detection parse failed: ${it.message}")
                 }
             }
         }
     }
 
-    private fun handleDisconnection() {
-        if (!isRunning.get() || currentRole != Role.COOK) return
-        
+    private fun scheduleReconnect() {
+        if (currentRole != Role.COOK) return
         _status.value = ConnectionStatus.RECONNECTING
         val delayTime = calculateBackoff()
-        Log.d(TAG, "[WS] Reconnecting in ${delayTime}ms (Attempt ${reconnectAttempt})")
-        _diagnostics.value = "Reconnecting in ${delayTime/1000}s..."
-        
+        _diagnostics.value = "Reconnecting in ${delayTime / 1000}s..."
+        Log.d(TAG, "[WS] Reconnect in ${delayTime}ms (attempt=$reconnectAttempt)")
+
         reconnectionJob?.cancel()
         reconnectionJob = viewModelScope.launch(Dispatchers.IO) {
             delay(delayTime)
-            if (isRunning.get()) {
-                startClient()
-            }
+            if (isRunning.get()) startClient()
         }
     }
 
-    private fun calculateBackoff(): Long {
-        reconnectAttempt++
-        val exponential = (Math.pow(2.0, reconnectAttempt.toDouble()).toLong() * 1000L)
-        return Math.min(exponential, maxReconnectDelay)
+    internal fun calculateBackoff(): Long {
+        val delay = BackoffPolicy.compute(reconnectAttempt)
+        reconnectAttempt = (reconnectAttempt + 1).coerceAtMost(BackoffPolicy.MAX_EXPONENT + 1)
+        return delay
     }
 
     private fun stopDiscovery() {
-        discoveryListener?.let { 
-            try {
-                nsdManager?.stopServiceDiscovery(it) 
-                Log.d(TAG, "[NSD] Service discovery stopped")
-            } catch (e: Exception) {
-                Log.e(TAG, "[NSD] Error stopping discovery: ${e.message}")
-            }
-        }
+        discoveryListener?.let { runCatching { nsdManager?.stopServiceDiscovery(it) } }
         discoveryListener = null
     }
 
+    private fun acquireMulticastLock(context: Context) {
+        runCatching {
+            val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            multicastLock = wifi?.createMulticastLock("vescurus-nsd")?.apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        }
+    }
+
+    private fun releaseMulticastLock() {
+        runCatching { multicastLock?.takeIf { it.isHeld }?.release() }
+        multicastLock = null
+    }
+
     // --- COMMON ---
-    fun broadcastDetection(detections: List<DetectionResult>) {
+    fun broadcastDetection(detections: List<IngredientDetection>) {
         if (currentRole != Role.GUIDE) return
-        
-        // Update local Guide overlay
         _latestDetections.value = detections
-        
+
         val session = activeServerSession
         if (session != null && _status.value == ConnectionStatus.CONNECTED) {
             viewModelScope.launch(Dispatchers.IO) {
-                try {
-                    val data = json.encodeToString(DetectionResponse(detections))
-                    Log.d(TAG, "[WS] Sending Detection: $data")
-                    session.send(PREFIX_DETECTION + data)
-                } catch (e: Exception) {
-                    Log.e(TAG, "[WS] Broadcast failed: ${e.message}")
-                }
+                runCatching {
+                    val payload = json.encodeToString(
+                        DetectionWirePayload.serializer(),
+                        DetectionWirePayload(detections)
+                    )
+                    session.send(PREFIX_DETECTION + payload)
+                }.onFailure { Log.e(TAG, "[WS] Broadcast failed: ${it.message}") }
             }
         }
     }
@@ -400,12 +427,10 @@ class VescurusConnectionManager : ViewModel() {
         val session = activeServerSession
         if (session != null && _status.value == ConnectionStatus.CONNECTED) {
             viewModelScope.launch(Dispatchers.IO) {
-                try {
-                    val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.DEFAULT)
-                    session.send(PREFIX_FRAME + base64)
-                } catch (e: Exception) {
-                    Log.e(TAG, "[WS] Failed to broadcast frame: ${e.message}")
-                }
+                runCatching {
+                    // Frame.Binary — no base64 tax on the wire.
+                    session.send(Frame.Binary(true, bytes))
+                }.onFailure { Log.e(TAG, "[WS] Frame broadcast failed: ${it.message}") }
             }
         }
     }
@@ -415,17 +440,35 @@ class VescurusConnectionManager : ViewModel() {
         val session = activeClientSession
         if (session != null && _status.value == ConnectionStatus.CONNECTED) {
             viewModelScope.launch(Dispatchers.IO) {
-                try {
+                runCatching {
                     session.send(CMD_TAKE_SNAPSHOT)
-                    Log.d(TAG, "[WS] Sent snapshot command to Guide")
-                } catch (e: Exception) {
-                    Log.e(TAG, "[WS] Failed to send snapshot command: ${e.message}")
-                }
+                }.onFailure { Log.e(TAG, "[WS] Snapshot command failed: ${it.message}") }
             }
         }
     }
 
-    private fun findFreePort(): Int {
-        return ServerSocket(0).use { it.localPort }
+    override fun onCleared() {
+        stop()
+        super.onCleared()
+    }
+
+    private fun findFreePort(): Int = ServerSocket(0).use { it.localPort }
+
+    private companion object {
+        const val TAG = "VescurusNet"
+        const val SERVICE_TYPE = "_vescurus._tcp."
+        const val SERVICE_NAME = "VESCURUS-GUIDE"
+        const val HANDSHAKE_INIT = "VESCURUS_HANDSHAKE_INIT"
+        const val HANDSHAKE_OK = "VESCURUS_HANDSHAKE_OK|GUIDE-01"
+        const val HANDSHAKE_FIN = "VESCURUS_HANDSHAKE_FIN|COOK-01"
+        const val PREFIX_DETECTION = "DETECTION|"
+        const val CMD_TAKE_SNAPSHOT = "CMD_TAKE_SNAPSHOT"
+
+        const val WS_PING_INTERVAL_MS = 15_000L
+        const val WS_TIMEOUT_MS = 30_000L
+        const val MAX_FRAME_SIZE_BYTES = 2L * 1024L * 1024L   // 2 MB cap prevents LAN OOM
+
+        @Suppress("unused")
+        val DEBUG = BuildConfig.DEBUG
     }
 }

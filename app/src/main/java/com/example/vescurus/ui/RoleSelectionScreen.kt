@@ -17,8 +17,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.vescurus.GoldPrimary
 import com.example.vescurus.model.Role
+import com.example.vescurus.ui.theme.GoldPrimary
 
 @Composable
 fun RoleSelectionScreen(onRoleSelected: (Role) -> Unit) {

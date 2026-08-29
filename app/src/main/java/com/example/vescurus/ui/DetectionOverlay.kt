@@ -3,7 +3,6 @@ package com.example.vescurus.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -14,52 +13,50 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.vescurus.model.DetectionResult
+import com.example.vescurus.domain.model.IngredientDetection
 
+/**
+ * Draws detection boxes on top of a camera preview or video feed.
+ *
+ * Gemini returns `[ymin, xmin, ymax, xmax]` normalized to the image it received
+ * (portrait upright, aspect [sourceAspect] = width/height). PreviewView applies
+ * FILL_CENTER — the on-screen aspect may differ from the source, cropping the
+ * long axis. This projection compensates for that horizontal crop.
+ *
+ * [sourceAspect] must match the aspect (width/height) of the image the model
+ * saw. For our 640x480 portrait analyzer, that's 480/640 = 0.75 (3/4).
+ */
 @OptIn(ExperimentalTextApi::class)
 @Composable
-fun DetectionOverlay(detections: List<DetectionResult>) {
+fun DetectionOverlay(
+    detections: List<IngredientDetection>,
+    sourceAspect: Float = 3f / 4f
+) {
     val textMeasurer = rememberTextMeasurer()
 
     Canvas(modifier = Modifier.fillMaxSize()) {
         val screenW = size.width
         val screenH = size.height
-
-        /*
-         * Gemini returns [ymin, xmin, ymax, xmax] relative to the image it
-         * receives. GuideScreen sends an upright portrait bitmap to Gemini.
-         * PreviewView displays the camera with its own aspect-ratio transform.
-         * This projection compensates for the horizontal FILL_CENTER crop
-         * used by the current portrait preview.
-         */
-        val sourceAspect = 3f / 4f // width / height of portrait source
         val displayedWidth = screenH * sourceAspect
         val horizontalCrop = ((displayedWidth - screenW) / 2f).coerceAtLeast(0f)
 
         detections.forEach { detection ->
             val box = detection.box_2d
 
-            // Accept both our internal 0..1 contract and Gemini's 0..1000
-            // coordinate convention.
-            val divisor = if (
-                box.top > 1.1f || box.left > 1.1f ||
-                box.bottom > 1.1f || box.right > 1.1f
-            ) 1000f else 1f
+            val ymin = box.ymin.coerceIn(0f, 1f)
+            val xmin = box.xmin.coerceIn(0f, 1f)
+            val ymax = box.ymax.coerceIn(0f, 1f)
+            val xmax = box.xmax.coerceIn(0f, 1f)
+            if (xmax <= xmin || ymax <= ymin) return@forEach
 
-            val top = (box.top / divisor).coerceIn(0f, 1f)
-            val left = (box.left / divisor).coerceIn(0f, 1f)
-            val bottom = (box.bottom / divisor).coerceIn(0f, 1f)
-            val right = (box.right / divisor).coerceIn(0f, 1f)
-
-            if (right <= left || bottom <= top) return@forEach
-
-            val topPx = top * screenH
-            val leftPx = left * displayedWidth - horizontalCrop
-            val bottomPx = bottom * screenH
-            val rightPx = right * displayedWidth - horizontalCrop
+            val topPx = ymin * screenH
+            val leftPx = xmin * displayedWidth - horizontalCrop
+            val bottomPx = ymax * screenH
+            val rightPx = xmax * displayedWidth - horizontalCrop
 
             val visibleLeft = leftPx.coerceIn(0f, screenW)
             val visibleRight = rightPx.coerceIn(0f, screenW)
@@ -68,14 +65,9 @@ fun DetectionOverlay(detections: List<DetectionResult>) {
 
             val boxWidth = visibleRight - visibleLeft
             val boxHeight = visibleBottom - visibleTop
-
             if (boxWidth <= 0f || boxHeight <= 0f) return@forEach
 
-            val rectColor = if (detection.supported) {
-                Color(0xFF22C55E)
-            } else {
-                Color(0xFFFF5252)
-            }
+            val rectColor = if (detection.is_supported) SupportedColor else UnsupportedColor
 
             drawRoundRect(
                 color = rectColor,
@@ -85,25 +77,21 @@ fun DetectionOverlay(detections: List<DetectionResult>) {
                 style = Stroke(width = 3.dp.toPx())
             )
 
-            val confidencePercent = (detection.confidence * 100f)
-                .coerceIn(0f, 100f)
-                .toInt()
+            val confidencePercent = (detection.confidence * 100f).coerceIn(0f, 100f).toInt()
             val labelText = "${detection.label.uppercase()} $confidencePercent%"
-            val textLayoutResult = textMeasurer.measure(
+            val layout = textMeasurer.measure(
                 text = AnnotatedString(labelText),
                 style = TextStyle(
                     color = Color.Black,
                     fontSize = 11.sp,
-                    fontWeight = androidx.compose.ui.text.font.FontWeight.Black
+                    fontWeight = FontWeight.Black
                 )
             )
 
-            val tagHeight = textLayoutResult.size.height + 6.dp.toPx()
-            val tagWidth = textLayoutResult.size.width + 12.dp.toPx()
+            val tagHeight = layout.size.height + 6.dp.toPx()
+            val tagWidth = layout.size.width + 12.dp.toPx()
             val tagTop = (visibleTop - tagHeight).coerceAtLeast(0f)
-            val tagLeft = visibleLeft.coerceAtMost(
-                (screenW - tagWidth).coerceAtLeast(0f)
-            )
+            val tagLeft = visibleLeft.coerceAtMost((screenW - tagWidth).coerceAtLeast(0f))
 
             drawRoundRect(
                 color = rectColor,
@@ -111,11 +99,13 @@ fun DetectionOverlay(detections: List<DetectionResult>) {
                 size = Size(tagWidth, tagHeight),
                 cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
             )
-
             drawText(
-                textLayoutResult = textLayoutResult,
+                textLayoutResult = layout,
                 topLeft = Offset(tagLeft + 6.dp.toPx(), tagTop + 3.dp.toPx())
             )
         }
     }
 }
+
+private val SupportedColor = Color(0xFF22C55E)
+private val UnsupportedColor = Color(0xFFFF5252)

@@ -2,98 +2,54 @@ package com.example.vescurus.data.repository
 
 import android.graphics.Bitmap
 import android.util.Log
-import com.example.vescurus.GeminiService
-import com.example.vescurus.debug.VescurusLogger
+import com.example.vescurus.BuildConfig
+import com.example.vescurus.data.remote.GeminiClient
+import com.example.vescurus.data.remote.Prompts
 import com.example.vescurus.domain.model.AnalysisResponse
 import com.example.vescurus.domain.model.BoundingBox
 import com.example.vescurus.domain.model.DetectionCandidate
+import com.example.vescurus.domain.model.DetectionMode
 import com.example.vescurus.domain.model.IngredientDetection
 import com.example.vescurus.domain.repository.IngredientRepository
+import com.example.vescurus.model.canonicalizeIngredientLabel
 import com.google.ai.client.generativeai.type.content
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
-class GeminiRepositoryImpl : IngredientRepository {
-    private val tag = "GeminiRepo"
+class GeminiRepositoryImpl(private val client: GeminiClient) : IngredientRepository {
+
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
     }
 
-    /**
-     * V0: prioritize detecting the intended egg target in the controlled Expo
-     * scene. A missed egg is much more damaging to the demo than an occasional
-     * false positive on an egg-like object.
-     */
-    private val prompt = """
-        You are VESCURUS's live camera detector for a controlled cooking demonstration.
-
-        PRIMARY TASK:
-        Find the main egg-like target visible in the image and localize it with a tight 2D bounding box.
-
-        HIGH-RECALL DEMO MODE:
-        If a prominent white, off-white, cream, lightly speckled, dirty, marked,
-        oval, or egg-shaped target is being deliberately presented to the camera,
-        identify it as "egg". The intended egg may be held in a hand, resting on
-        a tawa, resting on a table, partly covered by fingers, viewed from another
-        angle, moving slightly, or mildly motion-blurred.
-
-        Do not overthink edge cases. In this controlled demonstration, it is better
-        to detect the intended egg-like target than to miss it.
-
-        Ignore the hand itself, fingers, tawa, pan, table, utensils, phone, camera,
-        steam, smoke, shadows, reflections, and unrelated background objects.
-        Only return the intended egg target.
-
-        If the intended egg-like target is visible, return ONE detection labeled
-        exactly "egg". Give a high confidence when the target is reasonably clear.
-        If no plausible egg-like target is visible at all, return an empty list.
-
-        BOUNDING BOX:
-        box_2d MUST be [ymin, xmin, ymax, xmax] as four integers from 0 to 1000,
-        measured relative to the image supplied to you. Make the box tightly enclose
-        the visible egg-like target.
-
-        RETURN ONLY JSON:
-        {
-          "request_id": "v0",
-          "detections": [
-            {
-              "id": "egg-1",
-              "label": "egg",
-              "confidence": 0.96,
-              "box_2d": [250, 300, 700, 650],
-              "alternatives": [],
-              "is_supported": true
-            }
-          ],
-          "overall_confidence": 0.96
-        }
-
-        If no plausible target exists:
-        {
-          "request_id": "v0",
-          "detections": [],
-          "overall_confidence": 0.0
-        }
-
-        No markdown. No explanation. JSON only.
-    """.trimIndent()
-
     override suspend fun analyzeIngredients(
         rawBitmap: Bitmap,
-        scaledBitmap: Bitmap
+        scaledBitmap: Bitmap,
+        mode: DetectionMode
     ): AnalysisResponse = withContext(Dispatchers.IO) {
-        try {
-            Log.d(tag, "Sending V0 egg-detection frame: ${scaledBitmap.width}x${scaledBitmap.height}")
+        val prompt = when (mode) {
+            DetectionMode.EGG_ONLY -> Prompts.DETECTION_PROMPT
+            DetectionMode.GENERAL_INGREDIENTS -> Prompts.GENERAL_INGREDIENT_PROMPT
+        }
+        val promptVersion = when (mode) {
+            DetectionMode.EGG_ONLY -> Prompts.DETECTION_PROMPT_VERSION
+            DetectionMode.GENERAL_INGREDIENTS -> Prompts.GENERAL_INGREDIENT_PROMPT_VERSION
+        }
 
-            val response = GeminiService.model.generateContent(
+        try {
+            Log.d(TAG, "Sending prompt=$promptVersion mode=$mode image=${scaledBitmap.width}x${scaledBitmap.height}")
+
+            val response = client.detectorModel.generateContent(
                 content {
                     image(scaledBitmap)
                     text(prompt)
@@ -104,98 +60,127 @@ class GeminiRepositoryImpl : IngredientRepository {
                 ?: throw IllegalStateException("Empty response from Gemini")
             val cleanJson = extractJson(text)
 
-            Log.d(tag, "Gemini raw detection response: $cleanJson")
-            VescurusLogger.logInference(rawBitmap, scaledBitmap, cleanJson)
+            if (BuildConfig.DEBUG) {
+                Log.d(TAG, "Gemini raw: $cleanJson")
+            }
 
             val parsed = parseFlexibleResponse(cleanJson)
-            val sanitized = sanitizeDetectionResponse(parsed)
+            val sanitized = sanitizeDetectionResponse(parsed, mode)
 
-            Log.d(
-                tag,
-                "Parsed detections=${sanitized.detections.size}: " +
-                    sanitized.detections.joinToString { detection ->
-                        "${detection.label}=${detection.confidence} box=${detection.box_2d} supported=${detection.is_supported}"
-                    }
-            )
+            if (BuildConfig.DEBUG) {
+                Log.d(
+                    TAG,
+                    "Parsed detections=${sanitized.detections.size}: " +
+                        sanitized.detections.joinToString {
+                            "${it.label}=${it.confidence} box=${it.box_2d} supported=${it.is_supported}"
+                        }
+                )
+            }
 
             sanitized
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            Log.e(tag, "Analysis failed", e)
+            Log.e(TAG, "Analysis failed", e)
             throw e
         }
     }
 
     /**
-     * Accept both our original object-shaped box and Gemini's documented
-     * array-shaped [ymin, xmin, ymax, xmax] box format.
+     * Accepts both the historical object-shaped box (`{"ymin":…,"xmin":…}`)
+     * and Gemini's documented array-shaped `[ymin, xmin, ymax, xmax]` box.
+     * Missing/malformed entries are dropped, never crashed.
      */
-    private fun parseFlexibleResponse(text: String): AnalysisResponse {
+    internal fun parseFlexibleResponse(text: String): AnalysisResponse {
+        // Try strict deserialization first — cheap fast path.
         try {
             return json.decodeFromString<AnalysisResponse>(text)
         } catch (_: Exception) {
-            // Fall through to the flexible parser.
+            // Fall through to flexible parser below.
         }
 
         val root = json.parseToJsonElement(text).jsonObject
-        val requestId = root["request_id"]?.jsonPrimitive?.content ?: "v0"
-        val overallConfidence = root["overall_confidence"]?.jsonPrimitive?.floatOrNull ?: 0f
+        val requestId = root["request_id"]?.jsonPrimitive?.content ?: Prompts.DETECTION_PROMPT_VERSION
+        val overallConfidence = root["overall_confidence"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: 0f
         val detectionsJson = root["detections"]?.jsonArray ?: JsonArray(emptyList())
 
-        val detections = detectionsJson.mapNotNull { element ->
-            try {
-                val obj = element.jsonObject
-                val label = obj["label"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                val confidence = obj["confidence"]?.jsonPrimitive?.floatOrNull ?: 0f
-                val supported = obj["is_supported"]?.jsonPrimitive?.booleanOrNull ?: true
-                val boxElement = obj["box_2d"] ?: return@mapNotNull null
-
-                val box = when (boxElement) {
-                    is JsonArray -> {
-                        if (boxElement.size != 4) return@mapNotNull null
-                        BoundingBox(
-                            ymin = boxElement[0].jsonPrimitive.float,
-                            xmin = boxElement[1].jsonPrimitive.float,
-                            ymax = boxElement[2].jsonPrimitive.float,
-                            xmax = boxElement[3].jsonPrimitive.float
-                        )
-                    }
-                    is JsonObject -> {
-                        BoundingBox(
-                            ymin = boxElement["ymin"]?.jsonPrimitive?.floatOrNull ?: return@mapNotNull null,
-                            xmin = boxElement["xmin"]?.jsonPrimitive?.floatOrNull ?: return@mapNotNull null,
-                            ymax = boxElement["ymax"]?.jsonPrimitive?.floatOrNull ?: return@mapNotNull null,
-                            xmax = boxElement["xmax"]?.jsonPrimitive?.floatOrNull ?: return@mapNotNull null
-                        )
-                    }
-                    else -> return@mapNotNull null
-                }
-
-                IngredientDetection(
-                    id = obj["id"]?.jsonPrimitive?.content ?: "egg-${detections.size + 1}",
-                    label = label,
-                    confidence = confidence,
-                    box_2d = box,
-                    alternatives = emptyList<DetectionCandidate>(),
-                    is_supported = supported
-                )
-            } catch (_: Exception) {
-                null
-            }
+        // Build with explicit index so the fallback id is stable (the previous
+        // code read `detections.size` from inside the mapNotNull, which
+        // captured the outer field before it was assigned — every fallback id
+        // collapsed to "egg-1").
+        val parsedDetections = mutableListOf<IngredientDetection>()
+        detectionsJson.forEachIndexed { index, element ->
+            val det = element.parseDetection(index + 1) ?: return@forEachIndexed
+            parsedDetections += det
         }
 
         return AnalysisResponse(
             request_id = requestId,
-            detections = detections,
+            detections = parsedDetections,
             overall_confidence = overallConfidence
         )
     }
 
-    private fun sanitizeDetectionResponse(response: AnalysisResponse): AnalysisResponse {
+    private fun JsonElement.parseDetection(seq: Int): IngredientDetection? {
+        return try {
+            val obj = this.jsonObject
+            val label = obj["label"]?.jsonPrimitive?.content ?: return null
+            val confidence = obj["confidence"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: 0f
+            val supported = obj["is_supported"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: true
+            val boxElement = obj["box_2d"] ?: return null
+
+            val box = when (boxElement) {
+                is JsonArray -> {
+                    if (boxElement.size != 4) return null
+                    BoundingBox(
+                        ymin = boxElement[0].jsonPrimitive.contentOrNull?.toFloatOrNull() ?: return null,
+                        xmin = boxElement[1].jsonPrimitive.contentOrNull?.toFloatOrNull() ?: return null,
+                        ymax = boxElement[2].jsonPrimitive.contentOrNull?.toFloatOrNull() ?: return null,
+                        xmax = boxElement[3].jsonPrimitive.contentOrNull?.toFloatOrNull() ?: return null
+                    )
+                }
+                is JsonObject -> BoundingBox(
+                    ymin = boxElement["ymin"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: return null,
+                    xmin = boxElement["xmin"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: return null,
+                    ymax = boxElement["ymax"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: return null,
+                    xmax = boxElement["xmax"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: return null
+                )
+                else -> return null
+            }
+
+            IngredientDetection(
+                id = obj["id"]?.jsonPrimitive?.content ?: "det-$seq",
+                label = label,
+                confidence = confidence,
+                box_2d = box,
+                alternatives = emptyList<DetectionCandidate>(),
+                is_supported = supported
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Clamps, normalizes coordinates, and filters by [mode]:
+     * - EGG_ONLY: keep only detections whose canonical label == "egg".
+     * - GENERAL_INGREDIENTS: keep detections whose label maps to any
+     *   canonical vocabulary entry (see `canonicalizeIngredientLabel`).
+     */
+    internal fun sanitizeDetectionResponse(
+        response: AnalysisResponse,
+        mode: DetectionMode = DetectionMode.EGG_ONLY
+    ): AnalysisResponse {
         val sanitized = response.detections.mapNotNull { detection ->
-            val label = detection.label.trim().lowercase()
+            val canonical = canonicalizeIngredientLabel(detection.label) ?: return@mapNotNull null
+
+            when (mode) {
+                DetectionMode.EGG_ONLY -> if (canonical != "egg") return@mapNotNull null
+                DetectionMode.GENERAL_INGREDIENTS -> if (canonical == "Unsupported object") return@mapNotNull null
+            }
+
             val box = detection.box_2d
             val values = listOf(box.ymin, box.xmin, box.ymax, box.xmax)
-            if (label != "egg") return@mapNotNull null
             if (detection.confidence < 0f || detection.confidence > 1f) return@mapNotNull null
             if (values.any { it.isNaN() || it.isInfinite() }) return@mapNotNull null
 
@@ -217,7 +202,7 @@ class GeminiRepositoryImpl : IngredientRepository {
             ) return@mapNotNull null
 
             detection.copy(
-                label = "egg",
+                label = canonical,
                 box_2d = normalized,
                 is_supported = true
             )
@@ -229,12 +214,16 @@ class GeminiRepositoryImpl : IngredientRepository {
         )
     }
 
-    private fun extractJson(text: String): String {
+    internal fun extractJson(text: String): String {
         val start = text.indexOf('{')
         val end = text.lastIndexOf('}')
         if (start == -1 || end <= start) {
-            throw IllegalStateException("Gemini did not return a JSON object: $text")
+            throw IllegalStateException("Gemini did not return a JSON object: ${text.take(200)}")
         }
         return text.substring(start, end + 1)
+    }
+
+    private companion object {
+        const val TAG = "GeminiRepo"
     }
 }
