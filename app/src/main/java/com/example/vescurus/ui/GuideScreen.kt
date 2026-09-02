@@ -29,7 +29,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.vescurus.GoldPrimary
-import com.example.vescurus.detector.GeminiIngredientDetector
+import com.example.vescurus.detector.OnDeviceYoloIngredientDetector
 import com.example.vescurus.model.DetectionResult
 import com.example.vescurus.network.ConnectionStatus
 import kotlinx.coroutines.Dispatchers
@@ -59,7 +59,7 @@ fun GuideScreen(
         )
     }
 
-    val detector = remember { GeminiIngredientDetector() }
+    val detector = remember { OnDeviceYoloIngredientDetector(context.applicationContext) }
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
@@ -179,7 +179,7 @@ fun GuideScreen(
 
 @Composable
 fun CameraPreview(
-    detector: GeminiIngredientDetector,
+    detector: OnDeviceYoloIngredientDetector,
     onDetectionsUpdated: (List<DetectionResult>) -> Unit,
     onFrameAvailable: (ByteArray) -> Unit
 ) {
@@ -189,10 +189,8 @@ fun CameraPreview(
     val analyzerExecutor = remember { Executors.newSingleThreadExecutor() }
     val scope = rememberCoroutineScope()
 
-    // Gemini is cloud inference, so this is intentionally fast enough to look
-    // live while avoiding multiple in-flight requests. The previous real
-    // detection remains on screen between successful inference results.
-    val detectionIntervalMs = 1200L
+    // YOLO runs locally, so sample frequently while preventing overlapping inferences.
+    val detectionIntervalMs = 150L
     val lastAnalysisTime = remember { AtomicLong(0L) }
     val isDetecting = remember { AtomicBoolean(false) }
     val consecutiveEmptyResults = remember { AtomicInteger(0) }
@@ -201,7 +199,6 @@ fun CameraPreview(
     AndroidView(
         factory = { ctx ->
             val previewView = PreviewView(ctx).apply {
-                // Keep the normal full-screen camera presentation.
                 scaleType = PreviewView.ScaleType.FILL_CENTER
             }
 
@@ -233,7 +230,7 @@ fun CameraPreview(
                                     true
                                 )
 
-                                // 1. Existing low-latency Guide -> Cook video feed.
+                                // Keep the existing low-latency Guide -> Cook video feed.
                                 if (currentTime - lastFrameTime.get() >= 200L) {
                                     lastFrameTime.set(currentTime)
                                     val out = ByteArrayOutputStream()
@@ -241,8 +238,7 @@ fun CameraPreview(
                                     onFrameAvailable(out.toByteArray())
                                 }
 
-                                // 2. Real Gemini object detection.
-                                // Run immediately on the first frame, then about once every 1.2 s.
+                                // Local YOLO inference: no Gemini/cloud call for CV.
                                 val last = lastAnalysisTime.get()
                                 val due = last == 0L || currentTime - last >= detectionIntervalMs
 
@@ -250,20 +246,16 @@ fun CameraPreview(
                                     lastAnalysisTime.set(currentTime)
                                     val scaledBitmap = uprightBitmap.scaleDown(640)
 
-                                    scope.launch(Dispatchers.IO) {
+                                    scope.launch(Dispatchers.Default) {
                                         try {
-                                            Log.d("CV_FLOW", "Starting Gemini egg inference...")
                                             val results = detector.detect(uprightBitmap, scaledBitmap)
 
                                             launch(Dispatchers.Main) {
                                                 if (results.isNotEmpty()) {
-                                                    // A successful real detection is kept visible until a later
-                                                    // inference positively says it has disappeared.
                                                     consecutiveEmptyResults.set(0)
                                                     onDetectionsUpdated(results)
                                                 } else {
-                                                    // Do not make a single transient network/model miss erase
-                                                    // the visible box. Clear only after two consecutive misses.
+                                                    // Preserve the last positive detection across one transient miss.
                                                     val misses = consecutiveEmptyResults.incrementAndGet()
                                                     if (misses >= 2) {
                                                         onDetectionsUpdated(emptyList())
@@ -271,7 +263,7 @@ fun CameraPreview(
                                                 }
                                             }
                                         } catch (e: Exception) {
-                                            Log.e("CV_FLOW", "Gemini egg inference failed", e)
+                                            Log.e("CV_FLOW", "On-device YOLO inference failed", e)
                                         } finally {
                                             isDetecting.set(false)
                                         }
