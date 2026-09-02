@@ -19,7 +19,8 @@
         android:roundIcon="@drawable/ic_vescurus_logo"
         android:supportsRtl="true"
         android:theme="@style/Theme.VESCURUS"
-        android:usesCleartextTraffic="true">
+        android:usesCleartextTraffic="true"
+        tools:replace="android:allowBackup,android:dataExtractionRules,android:fullBackupContent">
         <activity
             android:name=".MainActivity"
             android:exported="true"

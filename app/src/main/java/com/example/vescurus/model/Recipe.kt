@@ -12,10 +12,11 @@ data class RecipeStep(
 
 data class Recipe(
     val id: String,
-    val categoryClass: Int, // 1: Omelette, 2: Scramble, 3: Sunny-Side, 4: Pancake
+    val categoryClass: Int = 0,
     val name: String,
     val description: String,
-    @DrawableRes val thumbnail: Int,
+    @DrawableRes val thumbnail: Int = R.drawable.scrambled_eggs,
+    val thumbnailUrl: String? = null,
     val totalTimeMs: Long,
     val steps: List<RecipeStep>,
     val calories: Int,

@@ -28,9 +28,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.SubcomposeAsyncImage
 import com.example.vescurus.GoldPrimary
 import com.example.vescurus.model.DetectionResult
-import com.example.vescurus.model.EGG_RECIPES
 import com.example.vescurus.model.Recipe
 import com.example.vescurus.model.canonicalizeIngredientLabel
 import com.example.vescurus.network.ConnectionStatus
@@ -46,15 +46,18 @@ fun CookScreen(
 ) {
     var isVisionHudEnabled by remember { mutableStateOf(true) }
 
-    val eggDetected = detections.any {
-        canonicalizeIngredientLabel(it.label) == "egg" &&
-                it.confidence >= 0.70f &&
-                it.supported
+    // Collect all valid detected food items
+    val detectedIngredients = remember(detections) {
+        detections
+            .filter { it.supported && it.confidence >= 0.50f }
+            .mapNotNull { canonicalizeIngredientLabel(it.label) }
+            .filter { it != "Unsupported object" }
+            .distinct()
     }
 
-    LaunchedEffect(eggDetected) {
-        if (eggDetected && viewModel.cookingState == CookingState.IDLE) {
-            viewModel.startRecipeSelection()
+    LaunchedEffect(detectedIngredients) {
+        if (detectedIngredients.isNotEmpty() && viewModel.cookingState == CookingState.IDLE) {
+            viewModel.startRecipeSelection(detectedIngredients)
         }
     }
 
@@ -175,7 +178,7 @@ fun CookScreen(
                                 CircularProgressIndicator(color = GoldPrimary, modifier = Modifier.size(32.dp))
                                 Spacer(modifier = Modifier.height(16.dp))
                                 Text(
-                                    text = "Scan ingredients to begin...",
+                                    text = "Scan any ingredients to begin...",
                                     color = Color.Gray,
                                     fontSize = 14.sp
                                 )
@@ -183,7 +186,7 @@ fun CookScreen(
                         }
                     }
                     CookingState.RECIPE_SELECTION -> {
-                        RecipeSelectionView(viewModel, detections)
+                        RecipeSelectionView(viewModel, detectedIngredients)
                     }
                     CookingState.COUNTDOWN, CookingState.COOKING -> {
                         CookingActiveWorkflow(viewModel)
@@ -201,41 +204,60 @@ fun CookScreen(
 }
 
 @Composable
-fun RecipeSelectionView(viewModel: CookViewModel, detections: List<DetectionResult>) {
-    val eggDetected = detections.any { 
-        canonicalizeIngredientLabel(it.label) == "egg" && it.confidence >= 0.7f 
-    }
-    
+fun RecipeSelectionView(viewModel: CookViewModel, detectedIngredients: List<String>) {
+    val availableRecipes by viewModel.availableRecipes.collectAsState()
+    val isFetching = viewModel.isFetchingRecipes
+
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text(
-            text = if (eggDetected) "EGG DETECTED" else "NO INGREDIENTS YET",
+            text = if (detectedIngredients.isNotEmpty()) "DETECTED: ${detectedIngredients.joinToString(", ").uppercase()}" else "UNIVERSAL RECIPES",
             color = GoldPrimary,
             fontSize = 12.sp,
             fontWeight = FontWeight.Black,
             letterSpacing = 2.sp
         )
         Text(
-            text = if (eggDetected) "What would you like to cook?" else "Scan ingredients to see recipes...",
+            text = if (isFetching) "Generating Custom Recipes..." else "What would you like to cook?",
             color = Color.White,
-            fontSize = 22.sp,
+            fontSize = 20.sp,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 16.dp)
+            modifier = Modifier.padding(bottom = 12.dp)
         )
-        
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            items(EGG_RECIPES) { recipe ->
-                RecipeSelectionCard(
-                    recipe = recipe,
-                    isSelected = viewModel.selectedRecipe?.id == recipe.id,
-                    onClick = { viewModel.selectRecipe(recipe) }
-                )
+
+        if (isFetching) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(180.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = GoldPrimary, modifier = Modifier.size(36.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Chef Gemini is crafting step-by-step timelines...",
+                        color = Color.Gray,
+                        fontSize = 13.sp,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(availableRecipes) { recipe ->
+                    RecipeSelectionCard(
+                        recipe = recipe,
+                        isSelected = viewModel.selectedRecipe?.id == recipe.id,
+                        onClick = { viewModel.selectRecipe(recipe) }
+                    )
+                }
             }
         }
         
-        AnimatedVisibility(visible = viewModel.selectedRecipe != null) {
+        AnimatedVisibility(visible = viewModel.selectedRecipe != null && !isFetching) {
             Button(
                 onClick = { viewModel.startCooking() },
                 modifier = Modifier.fillMaxWidth().padding(top = 16.dp).height(56.dp),
@@ -247,7 +269,6 @@ fun RecipeSelectionView(viewModel: CookViewModel, detections: List<DetectionResu
         }
     }
 }
-
 
 @Composable
 fun RecipeSelectionCard(recipe: Recipe, isSelected: Boolean, onClick: () -> Unit) {
@@ -261,12 +282,34 @@ fun RecipeSelectionCard(recipe: Recipe, isSelected: Boolean, onClick: () -> Unit
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Image(
-                painter = painterResource(id = recipe.thumbnail),
-                contentDescription = null,
-                modifier = Modifier.size(64.dp).clip(RoundedCornerShape(10.dp)),
-                contentScale = ContentScale.Crop
-            )
+            if (!recipe.thumbnailUrl.isNullOrEmpty()) {
+                SubcomposeAsyncImage(
+                    model = recipe.thumbnailUrl,
+                    contentDescription = recipe.name,
+                    modifier = Modifier.size(64.dp).clip(RoundedCornerShape(10.dp)),
+                    contentScale = ContentScale.Crop,
+                    loading = {
+                        Box(modifier = Modifier.fillMaxSize().background(Color.DarkGray), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(color = GoldPrimary, modifier = Modifier.size(20.dp))
+                        }
+                    },
+                    error = {
+                        Image(
+                            painter = painterResource(id = recipe.thumbnail),
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+                )
+            } else {
+                Image(
+                    painter = painterResource(id = recipe.thumbnail),
+                    contentDescription = null,
+                    modifier = Modifier.size(64.dp).clip(RoundedCornerShape(10.dp)),
+                    contentScale = ContentScale.Crop
+                )
+            }
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -276,8 +319,15 @@ fun RecipeSelectionCard(recipe: Recipe, isSelected: Boolean, onClick: () -> Unit
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "${recipe.totalTimeMs / 60000} MINS • ${recipe.calories} KCAL",
+                    text = recipe.description,
                     color = Color.Gray,
+                    fontSize = 12.sp,
+                    maxLines = 1
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "${recipe.totalTimeMs / 60000} MINS • ${recipe.calories} KCAL • ${recipe.proteinG.toInt()}g PRO",
+                    color = GoldPrimary,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Medium
                 )

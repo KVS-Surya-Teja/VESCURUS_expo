@@ -7,7 +7,9 @@ import androidx.compose.runtime.*
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.vescurus.BuildConfig
+import com.example.vescurus.data.repository.UniversalRecipeRepository
 import com.example.vescurus.model.CookHistoryItem
+import com.example.vescurus.model.EGG_RECIPES
 import com.example.vescurus.model.Recipe
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.content
@@ -35,8 +37,10 @@ class CookViewModel(application: Application) : AndroidViewModel(application), T
     
     var isTtsEnabled by mutableStateOf(true)
 
+    private val recipeRepository = UniversalRecipeRepository()
+
     private val chatModel = GenerativeModel(
-        modelName = "gemini-3.6-flash",
+        modelName = "gemini-2.5-flash",
         apiKey = BuildConfig.GEMINI_API_KEY
     )
 
@@ -47,10 +51,17 @@ class CookViewModel(application: Application) : AndroidViewModel(application), T
     // Persistent multi-turn chat session
     private val chatSession = chatModel.startChat(
         history = listOf(
-            content(role = "user") { text("You are VESCURUS, an edge AI culinary assistant. Keep all responses very brief, encouraging, and under 2 sentences. You are helping the user cook egg-based recipes.") },
-            content(role = "model") { text("I'm VESCURUS! I'm here to help you cook the perfect eggs. What's on the menu?") }
+            content(role = "user") { text("You are VESCURUS, an edge AI culinary assistant. Keep all responses very brief, encouraging, and under 2 sentences. You assist users in real-time with cooking any food, ingredient, dish, technique, or recipe.") },
+            content(role = "model") { text("I'm VESCURUS! I'm here to help you cook anything delicious. What are we making today?") }
         )
     )
+
+    // Available Recipes state (Dynamic)
+    private val _availableRecipes = MutableStateFlow<List<Recipe>>(EGG_RECIPES)
+    val availableRecipes: StateFlow<List<Recipe>> = _availableRecipes
+
+    var isFetchingRecipes by mutableStateOf(false)
+        private set
 
     // Cooking Flow State
     var cookingState by mutableStateOf(CookingState.IDLE)
@@ -71,8 +82,28 @@ class CookViewModel(application: Application) : AndroidViewModel(application), T
         }
     }
 
-    fun startRecipeSelection() {
+    fun startRecipeSelection(detectedIngredients: List<String> = emptyList()) {
         cookingState = CookingState.RECIPE_SELECTION
+        if (detectedIngredients.isNotEmpty()) {
+            fetchRecipesForIngredients(detectedIngredients)
+        }
+    }
+
+    fun fetchRecipesForIngredients(ingredients: List<String>) {
+        if (ingredients.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                isFetchingRecipes = true
+                Log.d(TAG, "Fetching dynamic recipes for ingredients: $ingredients")
+                val recipes = recipeRepository.generateRecipesForIngredients(ingredients)
+                _availableRecipes.value = recipes
+                speak("I've generated recipes based on your detected ingredients: ${ingredients.joinToString(", ")}. What would you like to make?")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to fetch recipes: ${e.message}")
+            } finally {
+                isFetchingRecipes = false
+            }
+        }
     }
 
     fun selectRecipe(recipe: Recipe) {

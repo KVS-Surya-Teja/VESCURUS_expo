@@ -15,6 +15,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.float
+import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -27,63 +30,49 @@ class GeminiRepositoryImpl : IngredientRepository {
     }
 
     /**
-     * V0: prioritize detecting the intended egg target in the controlled Expo
-     * scene. A missed egg is much more damaging to the demo than an occasional
-     * false positive on an egg-like object.
+     * Universal Open-World Food & Ingredient Vision Engine.
+     * Detects any visible food item, raw produce, protein, grain, dairy, or spice.
      */
     private val prompt = """
-        You are VESCURUS's live camera detector for a controlled cooking demonstration.
+        You are the universal open-world food, ingredient, and dish detector for VESCURUS.
 
         PRIMARY TASK:
-        Find the main egg-like target visible in the image and localize it with a tight 2D bounding box.
+        Identify ALL visible food items, raw ingredients, spices, vegetables, fruits, proteins, dairy, grains, or prepared dishes in the image.
 
-        HIGH-RECALL DEMO MODE:
-        If a prominent white, off-white, cream, lightly speckled, dirty, marked,
-        oval, or egg-shaped target is being deliberately presented to the camera,
-        identify it as "egg". The intended egg may be held in a hand, resting on
-        a tawa, resting on a table, partly covered by fingers, viewed from another
-        angle, moving slightly, or mildly motion-blurred.
+        HIGH-RECALL ACCURACY RULES:
+        - If an egg (raw in shell, boiled, or peeled), tomato, onion, chili, bread, cheese, fruit, vegetable, or protein is visible or presented to the camera, detect and localize it.
+        - Treat white, off-white, or oval food items presented in the camera view as "egg".
 
-        Do not overthink edge cases. In this controlled demonstration, it is better
-        to detect the intended egg-like target than to miss it.
+        Rules:
+        1. For each visible food item/ingredient, assign a tight 2D bounding box box_2d [ymin, xmin, ymax, xmax] as 4 integers from 0 to 1000.
+        2. Label the item with its standard common English name (e.g. "egg", "tomato", "chicken breast", "broccoli", "avocado", "cheese", "rice", "bread", "salmon", "onion", "apple").
+        3. Assign a confidence score between 0.0 and 1.0.
+        4. Ignore cookware (pans, tawa), utensils, hands, fingers, phones, cables, and background furniture.
 
-        Ignore the hand itself, fingers, tawa, pan, table, utensils, phone, camera,
-        steam, smoke, shadows, reflections, and unrelated background objects.
-        Only return the intended egg target.
-
-        If the intended egg-like target is visible, return ONE detection labeled
-        exactly "egg". Give a high confidence when the target is reasonably clear.
-        If no plausible egg-like target is visible at all, return an empty list.
-
-        BOUNDING BOX:
-        box_2d MUST be [ymin, xmin, ymax, xmax] as four integers from 0 to 1000,
-        measured relative to the image supplied to you. Make the box tightly enclose
-        the visible egg-like target.
-
-        RETURN ONLY JSON:
+        RETURN ONLY VALID JSON:
         {
-          "request_id": "v0",
+          "request_id": "open-world-v1",
           "detections": [
             {
-              "id": "egg-1",
+              "id": "food-1",
               "label": "egg",
-              "confidence": 0.96,
+              "confidence": 0.95,
               "box_2d": [250, 300, 700, 650],
               "alternatives": [],
               "is_supported": true
             }
           ],
-          "overall_confidence": 0.96
+          "overall_confidence": 0.95
         }
 
-        If no plausible target exists:
+        If no food items or ingredients are visible, return:
         {
-          "request_id": "v0",
+          "request_id": "open-world-v1",
           "detections": [],
           "overall_confidence": 0.0
         }
 
-        No markdown. No explanation. JSON only.
+        No markdown formatting. JSON only.
     """.trimIndent()
 
     override suspend fun analyzeIngredients(
@@ -91,7 +80,7 @@ class GeminiRepositoryImpl : IngredientRepository {
         scaledBitmap: Bitmap
     ): AnalysisResponse = withContext(Dispatchers.IO) {
         try {
-            Log.d(tag, "Sending V0 egg-detection frame: ${scaledBitmap.width}x${scaledBitmap.height}")
+            Log.d(tag, "Sending open-world vision frame to Gemini: ${scaledBitmap.width}x${scaledBitmap.height}")
 
             val response = GeminiService.model.generateContent(
                 content {
@@ -112,23 +101,19 @@ class GeminiRepositoryImpl : IngredientRepository {
 
             Log.d(
                 tag,
-                "Parsed detections=${sanitized.detections.size}: " +
+                "Parsed open-world detections=${sanitized.detections.size}: " +
                     sanitized.detections.joinToString { detection ->
-                        "${detection.label}=${detection.confidence} box=${detection.box_2d} supported=${detection.is_supported}"
+                        "${detection.label}=${detection.confidence} box=${detection.box_2d}"
                     }
             )
 
             sanitized
         } catch (e: Exception) {
-            Log.e(tag, "Analysis failed", e)
+            Log.e(tag, "Analysis failed: ${e.message}", e)
             throw e
         }
     }
 
-    /**
-     * Accept both our original object-shaped box and Gemini's documented
-     * array-shaped [ymin, xmin, ymax, xmax] box format.
-     */
     private fun parseFlexibleResponse(text: String): AnalysisResponse {
         try {
             return json.decodeFromString<AnalysisResponse>(text)
@@ -137,21 +122,21 @@ class GeminiRepositoryImpl : IngredientRepository {
         }
 
         val root = json.parseToJsonElement(text).jsonObject
-        val requestId = root["request_id"]?.jsonPrimitive?.content ?: "v0"
+        val requestId = root["request_id"]?.jsonPrimitive?.content ?: "open-world-v1"
         val overallConfidence = root["overall_confidence"]?.jsonPrimitive?.floatOrNull ?: 0f
         val detectionsJson = root["detections"]?.jsonArray ?: JsonArray(emptyList())
 
-        val detections = detectionsJson.mapNotNull { element ->
+        val detections = detectionsJson.mapIndexedNotNull { index, element ->
             try {
                 val obj = element.jsonObject
-                val label = obj["label"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                val label = obj["label"]?.jsonPrimitive?.content ?: return@mapIndexedNotNull null
                 val confidence = obj["confidence"]?.jsonPrimitive?.floatOrNull ?: 0f
                 val supported = obj["is_supported"]?.jsonPrimitive?.booleanOrNull ?: true
-                val boxElement = obj["box_2d"] ?: return@mapNotNull null
+                val boxElement = obj["box_2d"] ?: return@mapIndexedNotNull null
 
                 val box = when (boxElement) {
                     is JsonArray -> {
-                        if (boxElement.size != 4) return@mapNotNull null
+                        if (boxElement.size != 4) return@mapIndexedNotNull null
                         BoundingBox(
                             ymin = boxElement[0].jsonPrimitive.float,
                             xmin = boxElement[1].jsonPrimitive.float,
@@ -161,17 +146,17 @@ class GeminiRepositoryImpl : IngredientRepository {
                     }
                     is JsonObject -> {
                         BoundingBox(
-                            ymin = boxElement["ymin"]?.jsonPrimitive?.floatOrNull ?: return@mapNotNull null,
-                            xmin = boxElement["xmin"]?.jsonPrimitive?.floatOrNull ?: return@mapNotNull null,
-                            ymax = boxElement["ymax"]?.jsonPrimitive?.floatOrNull ?: return@mapNotNull null,
-                            xmax = boxElement["xmax"]?.jsonPrimitive?.floatOrNull ?: return@mapNotNull null
+                            ymin = boxElement["ymin"]?.jsonPrimitive?.floatOrNull ?: return@mapIndexedNotNull null,
+                            xmin = boxElement["xmin"]?.jsonPrimitive?.floatOrNull ?: return@mapIndexedNotNull null,
+                            ymax = boxElement["ymax"]?.jsonPrimitive?.floatOrNull ?: return@mapIndexedNotNull null,
+                            xmax = boxElement["xmax"]?.jsonPrimitive?.floatOrNull ?: return@mapIndexedNotNull null
                         )
                     }
-                    else -> return@mapNotNull null
+                    else -> return@mapIndexedNotNull null
                 }
 
                 IngredientDetection(
-                    id = obj["id"]?.jsonPrimitive?.content ?: "egg-${detections.size + 1}",
+                    id = obj["id"]?.jsonPrimitive?.content ?: "food-${index + 1}",
                     label = label,
                     confidence = confidence,
                     box_2d = box,
@@ -192,14 +177,15 @@ class GeminiRepositoryImpl : IngredientRepository {
 
     private fun sanitizeDetectionResponse(response: AnalysisResponse): AnalysisResponse {
         val sanitized = response.detections.mapNotNull { detection ->
-            val label = detection.label.trim().lowercase()
+            val rawLabel = detection.label.trim()
+            if (rawLabel.isEmpty()) return@mapNotNull null
+
             val box = detection.box_2d
             val values = listOf(box.ymin, box.xmin, box.ymax, box.xmax)
-            if (label != "egg") return@mapNotNull null
-            if (detection.confidence < 0f || detection.confidence > 1f) return@mapNotNull null
+            if (detection.confidence < 0.15f || detection.confidence > 1f) return@mapNotNull null
             if (values.any { it.isNaN() || it.isInfinite() }) return@mapNotNull null
 
-            // Accept either 0..1 (legacy) or 0..1000 (Gemini object detection).
+            // Accept either 0..1 or 0..1000 coordinate format.
             val normalized = if (values.any { it > 1.1f }) {
                 BoundingBox(
                     ymin = box.ymin / 1000f,
@@ -217,7 +203,7 @@ class GeminiRepositoryImpl : IngredientRepository {
             ) return@mapNotNull null
 
             detection.copy(
-                label = "egg",
+                label = rawLabel,
                 box_2d = normalized,
                 is_supported = true
             )

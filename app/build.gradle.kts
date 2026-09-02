@@ -9,14 +9,12 @@ plugins {
 
 android {
     namespace = "com.example.vescurus"
-    compileSdk {
-        version = release(37)
-    }
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.example.vescurus"
         minSdk = 24
-        targetSdk = 37
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 
@@ -29,6 +27,8 @@ android {
         }
         val apiKey = (properties.getProperty("GEMINI_API_KEY") ?: "").trim('"')
         buildConfigField("String", "GEMINI_API_KEY", "\"$apiKey\"")
+        val spoonacularKey = (properties.getProperty("SPOONACULAR_API_KEY") ?: "").trim('"')
+        buildConfigField("String", "SPOONACULAR_API_KEY", "\"$spoonacularKey\"")
     }
 
     buildTypes {
@@ -97,6 +97,8 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
     implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.17.0")
+    implementation("io.coil-kt:coil-compose:2.6.0")
     val cameraxVersion = "1.3.4"
     implementation("androidx.camera:camera-core:$cameraxVersion")
     implementation("androidx.camera:camera-camera2:$cameraxVersion")

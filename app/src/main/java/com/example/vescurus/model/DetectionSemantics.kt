@@ -2,51 +2,21 @@ package com.example.vescurus.model
 
 import java.util.Locale
 
-val SUPPORTED_INGREDIENT_LABELS = setOf(
-    "egg",
-    "onion",
-    "green chili",
-    "tomato",
-    "banana",
-    "flour",
-    "salt",
-    "black pepper",
-    "oil",
-    "butter",
-    "milk",
-    "turmeric powder",
-    "red chilli powder"
-)
-
+/**
+ * Universal canonicalizer for open-world ingredient and food labels.
+ */
 fun canonicalizeIngredientLabel(rawLabel: String): String? {
     val normalized = rawLabel.trim().lowercase(Locale.US)
-    return when {
-        normalized.contains("unsupported") -> "Unsupported object"
-        normalized.contains("egg") -> "egg"
-        normalized.contains("onion") -> "onion"
-        normalized.contains("green chili") || normalized.contains("green chilli") || normalized == "chili" || normalized == "chilli" -> "green chili"
-        normalized.contains("tomato") -> "tomato"
-        normalized.contains("banana") -> "banana"
-        normalized.contains("flour") -> "flour"
-        normalized.contains("salt") -> "salt"
-        normalized.contains("black pepper") || normalized == "pepper" -> "black pepper"
-        normalized.contains("oil") -> "oil"
-        normalized.contains("butter") -> "butter"
-        normalized.contains("milk") -> "milk"
-        normalized.contains("turmeric") -> "turmeric powder"
-        normalized.contains("red chilli") || normalized.contains("red chili") || normalized.contains("chilli powder") || normalized.contains("chili powder") -> "red chilli powder"
-        else -> null
+    if (normalized.isEmpty()) return null
+    
+    if (normalized.contains("unsupported") || normalized.contains("hazard") || 
+        normalized.contains("phone") || normalized.contains("cable") || normalized.contains("pen")) {
+        return "Unsupported object"
     }
-}
 
-fun deriveRecipeClass(labels: Collection<String>): Int {
-    val labelSet = labels.toSet()
-    return when {
-        "banana" in labelSet || "flour" in labelSet || "milk" in labelSet -> 4
-        "tomato" in labelSet -> 1
-        "onion" in labelSet || "green chili" in labelSet -> 2
-        "egg" in labelSet -> 3
-        else -> 0
+    // Capitalize words cleanly for UI presentation (e.g. "chicken breast", "cherry tomato")
+    return normalized.split(" ").joinToString(" ") { word ->
+        word.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.US) else it.toString() }
     }
 }
 
