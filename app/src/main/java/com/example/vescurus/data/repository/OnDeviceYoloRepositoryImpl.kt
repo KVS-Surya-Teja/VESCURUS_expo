@@ -17,12 +17,12 @@ import java.nio.FloatBuffer
 import java.util.Collections
 
 /**
- * Genuine Open-World On-Device YOLO Inference Engine (ONNX Runtime)
- * 
- * Runs YOLOv8 / YOLO-World object detection ON-DEVICE on Phone 1 (Guide) GPU/NPU.
- * Dynamically parses bounding boxes and maps detections to open-vocabulary food items.
- * 
- * Model asset location: app/src/main/assets/yolo_egg.onnx
+ * On-device YOLOv8-World v2 inference through ONNX Runtime.
+ *
+ * For this V0 test the model is exported with a single baked vocabulary class:
+ * "egg". This keeps the Android runtime simple: CameraX -> YOLO -> egg box.
+ *
+ * Model asset: app/src/main/assets/yolo_egg.onnx
  */
 class OnDeviceYoloRepositoryImpl(
     private val context: Context,
@@ -34,32 +34,19 @@ class OnDeviceYoloRepositoryImpl(
     private var session: OrtSession? = null
     private var isInitialized = false
 
-    companion object {
-        val OPEN_WORLD_FOOD_CLASSES = listOf(
-            "egg", "tomato", "onion", "green chili", "banana", "chicken breast",
-            "broccoli", "bread", "cheese", "apple", "potato", "garlic", "bell pepper",
-            "salmon", "rice", "pasta", "mushroom", "avocado", "carrot", "butter",
-            "milk", "flour", "spinach", "lemon", "lime", "cucumber", "beef", "pork",
-            "shrimp", "paneer", "tofu", "corn", "strawberry", "grape", "orange",
-            "olive oil", "black pepper", "salt", "turmeric", "chili powder",
-            "hot dog", "pizza", "donut", "cake", "sandwich", "bowl"
-        )
-    }
-
     init {
         initOnnxModel()
     }
 
     private fun initOnnxModel() {
         try {
-            val assetManager = context.assets
-            val modelBytes = assetManager.open(modelFileName).readBytes()
+            val modelBytes = context.assets.open(modelFileName).use { it.readBytes() }
             env = OrtEnvironment.getEnvironment()
             session = env?.createSession(modelBytes, OrtSession.SessionOptions())
             isInitialized = true
-            Log.d(tag, "ONNX YOLO Model successfully loaded on-device from assets/$modelFileName")
+            Log.d(tag, "Loaded on-device YOLO model from assets/$modelFileName")
         } catch (e: Exception) {
-            Log.w(tag, "ONNX model asset ($modelFileName) not present in app/src/main/assets/. Place $modelFileName in assets for on-device inference.")
+            Log.w(tag, "Missing YOLO model asset: assets/$modelFileName", e)
             isInitialized = false
         }
     }
@@ -68,8 +55,9 @@ class OnDeviceYoloRepositoryImpl(
         rawBitmap: Bitmap,
         scaledBitmap: Bitmap
     ): AnalysisResponse = withContext(Dispatchers.Default) {
-        if (!isInitialized || session == null || env == null) {
-            // If no model asset is present, return empty detections (NO hardcoded fake boxes)
+        val localEnv = env
+        val localSession = session
+        if (!isInitialized || localEnv == null || localSession == null) {
             return@withContext AnalysisResponse(
                 request_id = "ondevice-no-model",
                 detections = emptyList(),
@@ -78,121 +66,124 @@ class OnDeviceYoloRepositoryImpl(
         }
 
         try {
-            // Resize bitmap to 640x640 expected by YOLO
             val inputBitmap = Bitmap.createScaledBitmap(scaledBitmap, 640, 640, true)
             val floatBuffer = bitmapToFloatBuffer(inputBitmap)
             val inputShape = longArrayOf(1, 3, 640, 640)
 
-            val inputTensor = OnnxTensor.createTensor(env, floatBuffer, inputShape)
-            val results = session?.run(Collections.singletonMap("images", inputTensor))
-            val outputTensor = results?.get(0) as? OnnxTensor
+            OnnxTensor.createTensor(localEnv, floatBuffer, inputShape).use { inputTensor ->
+                localSession.run(Collections.singletonMap("images", inputTensor)).use { results ->
+                    val outputTensor = results.get(0) as? OnnxTensor
+                        ?: return@withContext AnalysisResponse("ondevice-error", emptyList(), 0f)
 
-            if (outputTensor == null) {
-                return@withContext AnalysisResponse("ondevice-error", emptyList(), 0f)
+                    outputTensor.use { tensor ->
+                        val shape = tensor.info.shape
+                        val output = FloatArray(tensor.floatBuffer.remaining())
+                        tensor.floatBuffer.get(output)
+
+                        val detections = parseYoloOutput(output, shape)
+                        val response = AnalysisResponse(
+                            request_id = "ondevice-yolo",
+                            detections = detections,
+                            overall_confidence = detections.maxOfOrNull { it.confidence } ?: 0f
+                        )
+
+                        VescurusLogger.logInference(
+                            rawBitmap,
+                            scaledBitmap,
+                            "ONNX YOLO found ${detections.size} egg detections"
+                        )
+                        response
+                    }
+                }
             }
-
-            // Parse YOLO output tensor
-            val outputArray = outputTensor.floatBuffer.array()
-            val detections = parseYoloOutput(outputArray)
-
-            val response = AnalysisResponse(
-                request_id = "ondevice-yolo",
-                detections = detections,
-                overall_confidence = detections.maxOfOrNull { it.confidence } ?: 0f
-            )
-
-            VescurusLogger.logInference(rawBitmap, scaledBitmap, "ONNX YOLO found ${detections.size} items")
-            response
         } catch (e: Exception) {
-            Log.e(tag, "ONNX inference error: ${e.message}")
+            Log.e(tag, "ONNX inference error", e)
             AnalysisResponse("ondevice-exception", emptyList(), 0f)
         }
     }
 
     private fun bitmapToFloatBuffer(bitmap: Bitmap): FloatBuffer {
-        val buffer = FloatBuffer.allocate(1 * 3 * 640 * 640)
         val pixels = IntArray(640 * 640)
         bitmap.getPixels(pixels, 0, 640, 0, 0, 640, 640)
+        val plane = 640 * 640
+        val buffer = FloatBuffer.allocate(plane * 3)
 
-        // CHW format (Channels x Height x Width), normalized to 0.0f - 1.0f
-        for (i in 0 until 640 * 640) {
-            val pixel = pixels[i]
-            val r = ((pixel shr 16) and 0xFF) / 255.0f
-            buffer.put(i, r)
-        }
-        for (i in 0 until 640 * 640) {
-            val pixel = pixels[i]
-            val g = ((pixel shr 8) and 0xFF) / 255.0f
-            buffer.put(640 * 640 + i, g)
-        }
-        for (i in 0 until 640 * 640) {
-            val pixel = pixels[i]
-            val b = (pixel and 0xFF) / 255.0f
-            buffer.put(2 * 640 * 640 + i, b)
+        // YOLO input: RGB, CHW, normalized to [0, 1].
+        for (i in 0 until plane) {
+            buffer.put(i, ((pixels[i] shr 16) and 0xFF) / 255f)
+            buffer.put(plane + i, ((pixels[i] shr 8) and 0xFF) / 255f)
+            buffer.put(2 * plane + i, (pixels[i] and 0xFF) / 255f)
         }
 
         buffer.rewind()
         return buffer
     }
 
-    private fun parseYoloOutput(outputArray: FloatArray): List<IngredientDetection> {
-        val confThreshold = 0.35f
-        val iouThreshold = 0.45f
-        val numAnchors = 8400
-        val numRows = outputArray.size / numAnchors
-        val numClasses = (numRows - 4).coerceAtLeast(1)
+    private fun parseYoloOutput(output: FloatArray, shape: LongArray): List<IngredientDetection> {
+        // Ultralytics YOLOv8 detect output is [1, 4 + classes, anchors].
+        // 640x640 => 8400 anchors. Derive both dimensions instead of hardcoding.
+        if (shape.size != 3) return emptyList()
 
+        val rows: Int
+        val anchors: Int
+        if (shape[1] <= 256) {
+            rows = shape[1].toInt()
+            anchors = shape[2].toInt()
+        } else {
+            rows = shape[2].toInt()
+            anchors = shape[1].toInt()
+        }
+
+        val numClasses = rows - 4
+        if (numClasses < 1 || output.size < rows * anchors) return emptyList()
+
+        // V0 is intentionally high-recall for the egg test.
+        val confThreshold = 0.15f
+        val iouThreshold = 0.45f
         val candidates = mutableListOf<RawDetection>()
 
-        for (col in 0 until numAnchors) {
-            val cx = outputArray[0 * numAnchors + col]
-            val cy = outputArray[1 * numAnchors + col]
-            val w = outputArray[2 * numAnchors + col]
-            val h = outputArray[3 * numAnchors + col]
+        for (col in 0 until anchors) {
+            val cx = output[col]
+            val cy = output[anchors + col]
+            val w = output[2 * anchors + col]
+            val h = output[3 * anchors + col]
 
-            var maxConf = 0f
-            var maxClassId = 0
-
-            if (numClasses == 1) {
-                maxConf = outputArray[4 * numAnchors + col]
-                maxClassId = 0
-            } else {
-                for (c in 0 until numClasses) {
-                    val score = outputArray[(4 + c) * numAnchors + col]
-                    if (score > maxConf) {
-                        maxConf = score
-                        maxClassId = c
-                    }
+            // The Android model is exported with one baked class (egg).
+            // If a multi-class YOLO model is supplied accidentally, choose its
+            // highest scoring class but only allow the first class through later.
+            var bestScore = 0f
+            var bestClass = 0
+            for (classId in 0 until numClasses) {
+                val score = output[(4 + classId) * anchors + col]
+                if (score > bestScore) {
+                    bestScore = score
+                    bestClass = classId
                 }
             }
 
-            if (maxConf >= confThreshold) {
-                val xmin = ((cx - w / 2f) / 640f).coerceIn(0f, 1f)
-                val ymin = ((cy - h / 2f) / 640f).coerceIn(0f, 1f)
-                val xmax = ((cx + w / 2f) / 640f).coerceIn(0f, 1f)
-                val ymax = ((cy + h / 2f) / 640f).coerceIn(0f, 1f)
+            if (bestClass != 0 || bestScore < confThreshold) continue
 
-                if (xmax > xmin + 0.02f && ymax > ymin + 0.02f) {
-                    val label = getFoodLabelForClassId(maxClassId)
-                    candidates.add(
-                        RawDetection(
-                            label = label,
-                            confidence = maxConf,
-                            box = BoundingBox(ymin, xmin, ymax, xmax)
-                        )
+            val xmin = ((cx - w / 2f) / 640f).coerceIn(0f, 1f)
+            val ymin = ((cy - h / 2f) / 640f).coerceIn(0f, 1f)
+            val xmax = ((cx + w / 2f) / 640f).coerceIn(0f, 1f)
+            val ymax = ((cy + h / 2f) / 640f).coerceIn(0f, 1f)
+
+            if (xmax > xmin + 0.02f && ymax > ymin + 0.02f) {
+                candidates.add(
+                    RawDetection(
+                        confidence = bestScore,
+                        box = BoundingBox(ymin, xmin, ymax, xmax)
                     )
-                }
+                )
             }
         }
 
-        val nmsDetections = applyNms(candidates, iouThreshold)
-
-        return nmsDetections.mapIndexed { index, raw ->
+        return applyNms(candidates, iouThreshold).mapIndexed { index, detection ->
             IngredientDetection(
-                id = "yolo-${index + 1}",
-                label = raw.label,
-                confidence = raw.confidence,
-                box_2d = raw.box,
+                id = "yolo-egg-${index + 1}",
+                label = "egg",
+                confidence = detection.confidence,
+                box_2d = detection.box,
                 alternatives = emptyList(),
                 is_supported = true
             )
@@ -200,24 +191,19 @@ class OnDeviceYoloRepositoryImpl(
     }
 
     private data class RawDetection(
-        val label: String,
         val confidence: Float,
         val box: BoundingBox
     )
 
-    private fun applyNms(candidates: List<RawDetection>, iouThreshold: Float): List<RawDetection> {
+    private fun applyNms(
+        candidates: List<RawDetection>,
+        iouThreshold: Float
+    ): List<RawDetection> {
         val sorted = candidates.sortedByDescending { it.confidence }
         val selected = mutableListOf<RawDetection>()
 
         for (candidate in sorted) {
-            var keep = true
-            for (prev in selected) {
-                if (computeIou(candidate.box, prev.box) > iouThreshold) {
-                    keep = false
-                    break
-                }
-            }
-            if (keep) {
+            if (selected.none { computeIou(candidate.box, it.box) > iouThreshold }) {
                 selected.add(candidate)
                 if (selected.size >= 5) break
             }
@@ -230,23 +216,10 @@ class OnDeviceYoloRepositoryImpl(
         val interYmin = maxOf(a.ymin, b.ymin)
         val interXmax = minOf(a.xmax, b.xmax)
         val interYmax = minOf(a.ymax, b.ymax)
-
-        val interWidth = maxOf(0f, interXmax - interXmin)
-        val interHeight = maxOf(0f, interYmax - interYmin)
-        val interArea = interWidth * interHeight
-
+        val interArea = maxOf(0f, interXmax - interXmin) * maxOf(0f, interYmax - interYmin)
         val areaA = (a.xmax - a.xmin) * (a.ymax - a.ymin)
         val areaB = (b.xmax - b.xmin) * (b.ymax - b.ymin)
-
-        val unionArea = areaA + areaB - interArea
-        return if (unionArea > 0f) interArea / unionArea else 0f
-    }
-
-    private fun getFoodLabelForClassId(classId: Int): String {
-        return if (classId in OPEN_WORLD_FOOD_CLASSES.indices) {
-            OPEN_WORLD_FOOD_CLASSES[classId]
-        } else {
-            "food item"
-        }
+        val union = areaA + areaB - interArea
+        return if (union > 0f) interArea / union else 0f
     }
 }
