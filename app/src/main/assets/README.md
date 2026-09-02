@@ -1,13 +1,20 @@
 # VESCURUS on-device YOLO model
 
-The Guide phone expects `yolo_food.onnx` in this directory.
+The Guide phone uses `yolo_food.onnx` for on-device ingredient detection.
 
-Generate it with:
+The model is built automatically by GitHub Actions from `yolov8s-worldv2.pt` with VESCURUS's baked food vocabulary. It is **not** committed to the source repository because it is a large generated binary.
+
+To build it manually:
 
 ```bash
-python tools/export_yolo_world_egg.py
+python -m pip install ultralytics
+python tools/export_yolo_world_food.py
 ```
 
-The export uses `yolov8s-worldv2.pt` with a baked multi-ingredient food vocabulary, then exports a 640x640 ONNX model for ONNX Runtime Android.
+The generated model is placed at:
 
-The binary model is intentionally not committed by this source-only change. The Android app returns no detections until `yolo_food.onnx` is present here.
+```text
+app/src/main/assets/yolo_food.onnx
+```
+
+For the Android app, the model must be available as an asset (or copied into app-private storage by the model downloader before ONNX Runtime initialization).
