@@ -17,22 +17,38 @@ import java.nio.FloatBuffer
 import java.util.Collections
 
 /**
- * On-device YOLOv8-World v2 inference through ONNX Runtime.
+ * On-device YOLO-World v2 inference through ONNX Runtime.
  *
- * For this V0 test the model is exported with a single baked vocabulary class:
- * "egg". This keeps the Android runtime simple: CameraX -> YOLO -> egg box.
+ * The exported model has a baked food vocabulary, so Android does not need
+ * Gemini, a laptop, or a text-embedding model for CV. The same pipeline can
+ * therefore recognize any class in FOOD_CLASSES, not just eggs.
  *
- * Model asset: app/src/main/assets/yolo_egg.onnx
+ * Model asset: app/src/main/assets/yolo_food.onnx
  */
 class OnDeviceYoloRepositoryImpl(
     private val context: Context,
-    private val modelFileName: String = "yolo_egg.onnx"
+    private val modelFileName: String = "yolo_food.onnx"
 ) : IngredientRepository {
 
     private val tag = "OnDeviceYoloRepo"
     private var env: OrtEnvironment? = null
     private var session: OrtSession? = null
     private var isInitialized = false
+
+    companion object {
+        // Keep this vocabulary broad enough for V0 while remaining practical
+        // for a single baked YOLO-World ONNX model.
+        val FOOD_CLASSES = listOf(
+            "egg", "tomato", "onion", "green chili", "banana", "chicken breast",
+            "broccoli", "bread", "cheese", "apple", "potato", "garlic", "bell pepper",
+            "salmon", "rice", "pasta", "mushroom", "avocado", "carrot", "butter",
+            "milk", "flour", "spinach", "lemon", "lime", "cucumber", "beef", "pork",
+            "shrimp", "paneer", "tofu", "corn", "strawberry", "grape", "orange",
+            "olive oil", "black pepper", "salt", "turmeric", "chili powder", "yogurt",
+            "cream", "beans", "peas", "cabbage", "cauliflower", "ginger", "coconut",
+            "oats", "peanut", "cashew", "almond", "honey", "sugar", "flour tortilla"
+        )
+    }
 
     init {
         initOnnxModel()
@@ -44,7 +60,7 @@ class OnDeviceYoloRepositoryImpl(
             env = OrtEnvironment.getEnvironment()
             session = env?.createSession(modelBytes, OrtSession.SessionOptions())
             isInitialized = true
-            Log.d(tag, "Loaded on-device YOLO model from assets/$modelFileName")
+            Log.d(tag, "Loaded on-device YOLO food model from assets/$modelFileName")
         } catch (e: Exception) {
             Log.w(tag, "Missing YOLO model asset: assets/$modelFileName", e)
             isInitialized = false
@@ -58,11 +74,7 @@ class OnDeviceYoloRepositoryImpl(
         val localEnv = env
         val localSession = session
         if (!isInitialized || localEnv == null || localSession == null) {
-            return@withContext AnalysisResponse(
-                request_id = "ondevice-no-model",
-                detections = emptyList(),
-                overall_confidence = 0f
-            )
+            return@withContext AnalysisResponse("ondevice-no-model", emptyList(), 0f)
         }
 
         try {
@@ -79,20 +91,19 @@ class OnDeviceYoloRepositoryImpl(
                         val shape = tensor.info.shape
                         val output = FloatArray(tensor.floatBuffer.remaining())
                         tensor.floatBuffer.get(output)
-
                         val detections = parseYoloOutput(output, shape)
-                        val response = AnalysisResponse(
-                            request_id = "ondevice-yolo",
-                            detections = detections,
-                            overall_confidence = detections.maxOfOrNull { it.confidence } ?: 0f
-                        )
 
                         VescurusLogger.logInference(
                             rawBitmap,
                             scaledBitmap,
-                            "ONNX YOLO found ${detections.size} egg detections"
+                            "ONNX YOLO found ${detections.size} food detections"
                         )
-                        response
+
+                        AnalysisResponse(
+                            request_id = "ondevice-yolo-food",
+                            detections = detections,
+                            overall_confidence = detections.maxOfOrNull { it.confidence } ?: 0f
+                        )
                     }
                 }
             }
@@ -108,20 +119,16 @@ class OnDeviceYoloRepositoryImpl(
         val plane = 640 * 640
         val buffer = FloatBuffer.allocate(plane * 3)
 
-        // YOLO input: RGB, CHW, normalized to [0, 1].
         for (i in 0 until plane) {
             buffer.put(i, ((pixels[i] shr 16) and 0xFF) / 255f)
             buffer.put(plane + i, ((pixels[i] shr 8) and 0xFF) / 255f)
             buffer.put(2 * plane + i, (pixels[i] and 0xFF) / 255f)
         }
-
         buffer.rewind()
         return buffer
     }
 
     private fun parseYoloOutput(output: FloatArray, shape: LongArray): List<IngredientDetection> {
-        // Ultralytics YOLOv8 detect output is [1, 4 + classes, anchors].
-        // 640x640 => 8400 anchors. Derive both dimensions instead of hardcoding.
         if (shape.size != 3) return emptyList()
 
         val rows: Int
@@ -137,7 +144,8 @@ class OnDeviceYoloRepositoryImpl(
         val numClasses = rows - 4
         if (numClasses < 1 || output.size < rows * anchors) return emptyList()
 
-        // V0 is intentionally high-recall for the egg test.
+        // High recall is intentional for V0. UI/FSM decides what constitutes
+        // a supported ingredient; CV should not silently discard weak targets.
         val confThreshold = 0.15f
         val iouThreshold = 0.45f
         val candidates = mutableListOf<RawDetection>()
@@ -148,12 +156,10 @@ class OnDeviceYoloRepositoryImpl(
             val w = output[2 * anchors + col]
             val h = output[3 * anchors + col]
 
-            // The Android model is exported with one baked class (egg).
-            // If a multi-class YOLO model is supplied accidentally, choose its
-            // highest scoring class but only allow the first class through later.
             var bestScore = 0f
-            var bestClass = 0
-            for (classId in 0 until numClasses) {
+            var bestClass = -1
+            val classLimit = minOf(numClasses, FOOD_CLASSES.size)
+            for (classId in 0 until classLimit) {
                 val score = output[(4 + classId) * anchors + col]
                 if (score > bestScore) {
                     bestScore = score
@@ -161,7 +167,7 @@ class OnDeviceYoloRepositoryImpl(
                 }
             }
 
-            if (bestClass != 0 || bestScore < confThreshold) continue
+            if (bestClass < 0 || bestScore < confThreshold) continue
 
             val xmin = ((cx - w / 2f) / 640f).coerceIn(0f, 1f)
             val ymin = ((cy - h / 2f) / 640f).coerceIn(0f, 1f)
@@ -171,6 +177,7 @@ class OnDeviceYoloRepositoryImpl(
             if (xmax > xmin + 0.02f && ymax > ymin + 0.02f) {
                 candidates.add(
                     RawDetection(
+                        label = FOOD_CLASSES[bestClass],
                         confidence = bestScore,
                         box = BoundingBox(ymin, xmin, ymax, xmax)
                     )
@@ -178,10 +185,10 @@ class OnDeviceYoloRepositoryImpl(
             }
         }
 
-        return applyNms(candidates, iouThreshold).mapIndexed { index, detection ->
+        return applyClassAwareNms(candidates, iouThreshold).mapIndexed { index, detection ->
             IngredientDetection(
-                id = "yolo-egg-${index + 1}",
-                label = "egg",
+                id = "yolo-food-${index + 1}",
+                label = detection.label,
                 confidence = detection.confidence,
                 box_2d = detection.box,
                 alternatives = emptyList(),
@@ -191,11 +198,12 @@ class OnDeviceYoloRepositoryImpl(
     }
 
     private data class RawDetection(
+        val label: String,
         val confidence: Float,
         val box: BoundingBox
     )
 
-    private fun applyNms(
+    private fun applyClassAwareNms(
         candidates: List<RawDetection>,
         iouThreshold: Float
     ): List<RawDetection> {
@@ -203,9 +211,13 @@ class OnDeviceYoloRepositoryImpl(
         val selected = mutableListOf<RawDetection>()
 
         for (candidate in sorted) {
-            if (selected.none { computeIou(candidate.box, it.box) > iouThreshold }) {
+            // Different food classes may legitimately overlap (e.g. egg on bread),
+            // so suppress only overlapping boxes of the same class.
+            if (selected.none {
+                    it.label == candidate.label && computeIou(candidate.box, it.box) > iouThreshold
+                }) {
                 selected.add(candidate)
-                if (selected.size >= 5) break
+                if (selected.size >= 10) break
             }
         }
         return selected
