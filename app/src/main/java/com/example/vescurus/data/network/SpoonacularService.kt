@@ -62,6 +62,14 @@ class SpoonacularService {
         engine { requestTimeout = 5000 }
     }
 
+    /**
+     * VESCURUS cooking surface:
+     * a stationary electric tawa / flat griddle with slight rims and NO lid.
+     *
+     * We therefore deliberately select recipes whose instructions are compatible
+     * with direct-contact griddle cooking and reject recipes that depend on an
+     * oven, microwave, pressure cooker, steaming, or covered cooking.
+     */
     suspend fun fetchRecipesByIngredients(ingredients: List<String>): List<Recipe> = withContext(Dispatchers.IO) {
         val apiKey = BuildConfig.SPOONACULAR_API_KEY.trim()
         if (apiKey.isEmpty()) {
@@ -73,26 +81,45 @@ class SpoonacularService {
             val ingredientsParam = ingredients.joinToString(",") {
                 URLEncoder.encode(it.trim(), "UTF-8")
             }
-            val searchUrl = "https://api.spoonacular.com/recipes/findByIngredients?ingredients=$ingredientsParam&number=3&ranking=1&apiKey=$apiKey"
-            Log.d(tag, "Querying Spoonacular for ${ingredients.joinToString(", ")}")
+
+            // Pan/stovetop is the closest Spoonacular equipment constraint to our
+            // physical cooking platform. Compatibility is checked again below.
+            val searchUrl = "https://api.spoonacular.com/recipes/complexSearch" +
+                    "?includeIngredients=$ingredientsParam" +
+                    "&equipment=pan" +
+                    "&number=8" +
+                    "&instructionsRequired=true" +
+                    "&addRecipeInformation=true" +
+                    "&fillIngredients=false" +
+                    "&apiKey=$apiKey"
+
+            Log.d(tag, "Querying Spoonacular for tawa-compatible recipes: ${ingredients.joinToString(", ")}")
 
             val searchResponse = client.get(searchUrl).bodyAsText()
-            val searchItems = json.decodeFromString<List<SpoonacularSearchItem>>(searchResponse)
+            val searchRoot = json.decodeFromString<SpoonacularComplexSearchResponse>(searchResponse)
 
-            if (searchItems.isEmpty()) {
-                Log.d(tag, "Spoonacular returned 0 recipes for ingredients: $ingredients")
+            if (searchRoot.results.isEmpty()) {
+                Log.d(tag, "Spoonacular returned 0 candidate recipes for ingredients: $ingredients")
                 return@withContext emptyList()
             }
 
             val recipes = mutableListOf<Recipe>()
-            for (item in searchItems) {
+            for (candidate in searchRoot.results) {
                 try {
-                    val detailUrl = "https://api.spoonacular.com/recipes/${item.id}/information?includeNutrition=true&apiKey=$apiKey"
+                    val detailUrl = "https://api.spoonacular.com/recipes/${candidate.id}/information?includeNutrition=true&apiKey=$apiKey"
                     val detailResponse = client.get(detailUrl).bodyAsText()
                     val detail = json.decodeFromString<SpoonacularRecipeDetail>(detailResponse)
-                    recipes.add(mapDetailToRecipe(detail))
+                    val recipe = mapDetailToRecipe(detail)
+
+                    if (isTawaCompatible(recipe)) {
+                        recipes.add(recipe)
+                    } else {
+                        Log.d(tag, "Rejected non-tawa recipe: ${detail.title}")
+                    }
+
+                    if (recipes.size >= 5) break
                 } catch (e: Exception) {
-                    Log.e(tag, "Failed to fetch Spoonacular details for recipe ${item.id}: ${e.message}")
+                    Log.e(tag, "Failed to fetch Spoonacular details for recipe ${candidate.id}: ${e.message}")
                 }
             }
 
@@ -101,6 +128,58 @@ class SpoonacularService {
             Log.e(tag, "Spoonacular API call failed: ${e.message}")
             emptyList()
         }
+    }
+
+    @Serializable
+    private data class SpoonacularComplexSearchResponse(
+        val results: List<SpoonacularSearchItem> = emptyList()
+    )
+
+    /**
+     * Cooking operations that fit a flat electric tawa without requiring a lid.
+     * This is intentionally broad: the tawa can do much more than omelettes/dosas.
+     *
+     * Examples include sautéing, stir-frying, pan-frying, shallow-frying, searing,
+     * dry-roasting, toasting, scrambling, griddling, grilling, and batter-based
+     * foods such as crepes, pancakes, dosas and flatbreads.
+     */
+    private val allowedCookingTerms = listOf(
+        "saute", "sauté", "stir-fry", "stir fry", "pan-fry", "pan fry",
+        "shallow-fry", "shallow fry", "fry", "sear", "brown", "caramelize",
+        "caramelise", "griddle", "grill", "toast", "dry roast", "roast",
+        "scramble", "omelet", "omelette", "crepe", "crêpe", "pancake",
+        "dosa", "dosai", "uttapam", "cheela", "chilla", "pancake",
+        "flatbread", "roti", "chapati", "paratha", "naan", "tortilla",
+        "quesadilla", "sandwich", "burger", "patty", "cutlet", "kebab",
+        "skillet", "pan", "tawa", "griddle"
+    )
+
+    /**
+     * Processes/equipment that conflict with the physical VESCURUS platform.
+     * These are checked against the complete step text, not merely the title.
+     */
+    private val forbiddenCookingTerms = listOf(
+        "oven", "bake", "baking", "broil", "broiler", "microwave",
+        "pressure cooker", "pressure-cook", "air fryer", "air-fry",
+        "deep fryer", "deep-fry", "steamer", "steam", "steamed", "steaming",
+        "double boiler", "slow cooker", "crockpot", "rice cooker",
+        "sous vide", "covered pan", "cover the pan", "cover and cook",
+        "place in the oven", "transfer to oven", "bake for", "baked"
+    )
+
+    private fun isTawaCompatible(recipe: Recipe): Boolean {
+        if (recipe.steps.isEmpty()) return false
+
+        val instructions = recipe.steps.joinToString(" ") { it.instruction.lowercase() }
+
+        // Hard rejection: these operations require equipment/processes that the
+        // VESCURUS tawa does not provide.
+        if (forbiddenCookingTerms.any { instructions.contains(it) }) return false
+
+        // Require at least one direct-contact/stovetop cue. This avoids selecting
+        // recipes that happen not to mention an oven but are fundamentally based
+        // on boiling, simmering, or another unsupported process.
+        return allowedCookingTerms.any { instructions.contains(it) }
     }
 
     private fun mapDetailToRecipe(detail: SpoonacularRecipeDetail): Recipe {
@@ -132,7 +211,7 @@ class SpoonacularService {
         val pro = nutrients.firstOrNull { it.name.equals("Protein", ignoreCase = true) }?.amount?.toFloat() ?: 15f
         val carbs = nutrients.firstOrNull { it.name.equals("Carbohydrates", ignoreCase = true) }?.amount?.toFloat() ?: 20f
         val fat = nutrients.firstOrNull { it.name.equals("Fat", ignoreCase = true) }?.amount?.toFloat() ?: 10f
-        val cleanSummary = detail.summary?.replace(Regex("<[^>]*>"), "")?.take(100) ?: "Spoonacular recipe"
+        val cleanSummary = detail.summary?.replace(Regex("<[^>]*>"), "")?.take(100) ?: "Tawa-compatible recipe"
 
         return Recipe(
             id = "spoon-${detail.id}",
