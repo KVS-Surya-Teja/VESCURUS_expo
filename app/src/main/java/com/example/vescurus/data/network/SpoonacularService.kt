@@ -12,6 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.net.URLEncoder
 
 @Serializable
 data class SpoonacularSearchItem(
@@ -69,28 +70,27 @@ class SpoonacularService {
         }
 
         try {
-            val ingredientsParam = ingredients.joinToString(",")
+            val ingredientsParam = ingredients.joinToString(",") {
+                URLEncoder.encode(it.trim(), "UTF-8")
+            }
             val searchUrl = "https://api.spoonacular.com/recipes/findByIngredients?ingredients=$ingredientsParam&number=3&ranking=1&apiKey=$apiKey"
-            Log.d(tag, "Querying Spoonacular Search API: $searchUrl")
+            Log.d(tag, "Querying Spoonacular for ${ingredients.joinToString(", ")}")
 
             val searchResponse = client.get(searchUrl).bodyAsText()
             val searchItems = json.decodeFromString<List<SpoonacularSearchItem>>(searchResponse)
 
             if (searchItems.isEmpty()) {
-                Log.d(tag, "Spoonacular returned 0 recipes for ingredients: $ingredientsParam")
+                Log.d(tag, "Spoonacular returned 0 recipes for ingredients: $ingredients")
                 return@withContext emptyList()
             }
 
-            // Fetch details for each search result
             val recipes = mutableListOf<Recipe>()
             for (item in searchItems) {
                 try {
                     val detailUrl = "https://api.spoonacular.com/recipes/${item.id}/information?includeNutrition=true&apiKey=$apiKey"
                     val detailResponse = client.get(detailUrl).bodyAsText()
                     val detail = json.decodeFromString<SpoonacularRecipeDetail>(detailResponse)
-
-                    val recipe = mapDetailToRecipe(detail)
-                    recipes.add(recipe)
+                    recipes.add(mapDetailToRecipe(detail))
                 } catch (e: Exception) {
                     Log.e(tag, "Failed to fetch Spoonacular details for recipe ${item.id}: ${e.message}")
                 }
@@ -108,7 +108,6 @@ class SpoonacularService {
         val prepTimeMins = detail.readyInMinutes.coerceAtLeast(2)
         val totalMs = prepTimeMins * 60 * 1000L
 
-        // Generate time slots for each step
         val stepsList = if (rawSteps.isNotEmpty()) {
             val stepDurationMs = totalMs / rawSteps.size
             rawSteps.mapIndexed { index, st ->
@@ -128,14 +127,12 @@ class SpoonacularService {
             )
         }
 
-        // Extract Macros
         val nutrients = detail.nutrition?.nutrients ?: emptyList()
         val cals = nutrients.firstOrNull { it.name.equals("Calories", ignoreCase = true) }?.amount?.toInt() ?: 250
         val pro = nutrients.firstOrNull { it.name.equals("Protein", ignoreCase = true) }?.amount?.toFloat() ?: 15f
         val carbs = nutrients.firstOrNull { it.name.equals("Carbohydrates", ignoreCase = true) }?.amount?.toFloat() ?: 20f
         val fat = nutrients.firstOrNull { it.name.equals("Fat", ignoreCase = true) }?.amount?.toFloat() ?: 10f
-
-        val cleanSummary = detail.summary?.replace(Regex("<[^>]*>"), "")?.take(100) ?: "Delicious Spoonacular Recipe"
+        val cleanSummary = detail.summary?.replace(Regex("<[^>]*>"), "")?.take(100) ?: "Spoonacular recipe"
 
         return Recipe(
             id = "spoon-${detail.id}",
