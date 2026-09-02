@@ -7,6 +7,9 @@ on:
       - "tools/export_yolo_world_food.py"
       - ".github/workflows/build-yolo-food-model.yml"
 
+permissions:
+  contents: write
+
 jobs:
   export:
     runs-on: ubuntu-latest
@@ -25,9 +28,11 @@ jobs:
       - name: Export ONNX model
         run: python tools/export_yolo_world_food.py
 
-      - name: Upload model artifact
-        uses: actions/upload-artifact@v4
+      - name: Publish model release
+        uses: softprops/action-gh-release@v2
         with:
-          name: yolo-food-onnx
-          path: app/src/main/assets/yolo_food.onnx
-          if-no-files-found: error
+          tag_name: yolo-food-model
+          name: VESCURUS YOLO Food Model
+          body: Automated YOLOv8-World v2 export with the VESCURUS baked food vocabulary.
+          files: app/src/main/assets/yolo_food.onnx
+          make_latest: false
