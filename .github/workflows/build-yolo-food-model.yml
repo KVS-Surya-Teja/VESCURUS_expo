@@ -1,0 +1,33 @@
+name: Build YOLO food model
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "tools/export_yolo_world_food.py"
+      - ".github/workflows/build-yolo-food-model.yml"
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Ultralytics
+        run: python -m pip install --upgrade pip && python -m pip install ultralytics
+
+      - name: Export ONNX model
+        run: python tools/export_yolo_world_food.py
+
+      - name: Upload model artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: yolo-food-onnx
+          path: app/src/main/assets/yolo_food.onnx
+          if-no-files-found: error
