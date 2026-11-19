@@ -55,6 +55,12 @@ fun CookScreen(
             .distinct()
     }
 
+    // Guard: only trigger once per IDLE state. LaunchedEffect re-runs when the
+    // detectedIngredients snapshot changes, but we guard on cookingState == IDLE
+    // so that repeated detections of the same ingredient do not re-invoke
+    // startRecipeSelection while the user is selecting a recipe or cooking.
+    // Using a stable key (detectedIngredients) means this re-evaluates when
+    // the detected set changes, but the state check prevents double-firing.
     LaunchedEffect(detectedIngredients) {
         if (detectedIngredients.isNotEmpty() && viewModel.cookingState == CookingState.IDLE) {
             viewModel.startRecipeSelection(detectedIngredients)
@@ -362,7 +368,7 @@ fun CookingActiveWorkflow(viewModel: CookViewModel) {
             }
             Spacer(modifier = Modifier.height(4.dp))
             LinearProgressIndicator(
-                progress = progress,
+                progress = { progress },
                 modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape),
                 color = GoldPrimary,
                 trackColor = Color.DarkGray

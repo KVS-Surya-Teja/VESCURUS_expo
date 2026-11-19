@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -40,66 +41,56 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
+// ---------------------------------------------------------------------------
+// GuideContent — pure UI layer, preview-safe (no camera / no network deps)
+// ---------------------------------------------------------------------------
+
+/**
+ * Renders the Guide screen UI given plain state values.
+ * [cameraSlot] is an optional composable that fills the background —
+ * when null a solid-black placeholder is shown (used in Compose Preview).
+ */
 @Composable
-fun GuideScreen(
+fun GuideContent(
     status: ConnectionStatus,
     diagnostics: String,
     detections: List<DetectionResult>,
-    onDetectionsUpdated: (List<DetectionResult>) -> Unit,
-    onFrameAvailable: (ByteArray) -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit = {},
+    cameraSlot: (@Composable () -> Unit)? = null
 ) {
-    val context = LocalContext.current
-    var hasCameraPermission by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.CAMERA
-            ) == PackageManager.PERMISSION_GRANTED
-        )
-    }
-
-    val detector = remember { GeminiIngredientDetector() }
-
-    val launcher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission(),
-        onResult = { granted -> hasCameraPermission = granted }
-    )
-
-    LaunchedEffect(Unit) {
-        if (!hasCameraPermission) launcher.launch(Manifest.permission.CAMERA)
-    }
-
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        if (hasCameraPermission) {
-            CameraPreview(detector, onDetectionsUpdated, onFrameAvailable)
-            DetectionOverlay(detections = detections)
+        // Camera surface OR black preview placeholder
+        if (cameraSlot != null) {
+            cameraSlot()
+        }
 
-            if (detections.isEmpty()) {
-                Box(
+        // Detection overlay always on top of camera feed
+        DetectionOverlay(detections = detections)
+
+        // Viewfinder hint when nothing is detected
+        if (detections.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(250.dp)
+                    .border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+            ) {
+                Text(
+                    text = "CENTER INGREDIENT HERE",
+                    color = Color.White.copy(alpha = 0.5f),
+                    fontSize = 10.sp,
                     modifier = Modifier
-                        .align(Alignment.Center)
-                        .size(250.dp)
-                        .border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-                ) {
-                    Text(
-                        text = "CENTER INGREDIENT HERE",
-                        color = Color.White.copy(alpha = 0.5f),
-                        fontSize = 10.sp,
-                        modifier = Modifier.align(Alignment.BottomCenter).padding(8.dp)
-                    )
-                }
-            }
-        } else {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(text = "Camera Permission Required", color = Color.White)
+                        .align(Alignment.BottomCenter)
+                        .padding(8.dp)
+                )
             }
         }
 
+        // Back button
         IconButton(
             onClick = onBack,
             modifier = Modifier
@@ -114,6 +105,7 @@ fun GuideScreen(
             )
         }
 
+        // Status card at the bottom
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -168,13 +160,78 @@ fun GuideScreen(
                             color = GoldPrimary.copy(alpha = 0.8f),
                             fontSize = 12.sp,
                             modifier = Modifier.padding(top = 8.dp),
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            textAlign = TextAlign.Center
                         )
                     }
                 }
             }
         }
+
+        // Camera permission denied state (shown when cameraSlot is wired but permission absent)
+        // No-op in preview: cameraSlot is null so this branch is never reached.
     }
+}
+
+// ---------------------------------------------------------------------------
+// GuideScreen — camera-wired entry point
+// ---------------------------------------------------------------------------
+
+@Composable
+fun GuideScreen(
+    status: ConnectionStatus,
+    diagnostics: String,
+    detections: List<DetectionResult>,
+    onDetectionsUpdated: (List<DetectionResult>) -> Unit,
+    onFrameAvailable: (ByteArray) -> Unit,
+    onBack: () -> Unit
+) {
+    val context = LocalContext.current
+    var hasCameraPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.CAMERA
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    val detector = remember { GeminiIngredientDetector() }
+
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { granted -> hasCameraPermission = granted }
+    )
+
+    LaunchedEffect(Unit) {
+        if (!hasCameraPermission) launcher.launch(Manifest.permission.CAMERA)
+    }
+
+    if (!hasCameraPermission) {
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(text = "Camera Permission Required", color = Color.White, fontSize = 16.sp)
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(onClick = { launcher.launch(Manifest.permission.CAMERA) }) {
+                    Text("Grant Permission")
+                }
+            }
+        }
+        return
+    }
+
+    GuideContent(
+        status = status,
+        diagnostics = diagnostics,
+        detections = detections,
+        onBack = onBack,
+        cameraSlot = {
+            CameraPreview(
+                detector = detector,
+                onDetectionsUpdated = onDetectionsUpdated,
+                onFrameAvailable = onFrameAvailable
+            )
+        }
+    )
 }
 
 @Composable
