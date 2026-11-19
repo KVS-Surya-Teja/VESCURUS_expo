@@ -36,8 +36,26 @@ fun DetectionOverlay(detections: List<DetectionResult>) {
          * used by the current portrait preview.
          */
         val sourceAspect = 3f / 4f // width / height of portrait source
-        val displayedWidth = screenH * sourceAspect
-        val horizontalCrop = ((displayedWidth - screenW) / 2f).coerceAtLeast(0f)
+        val screenAspect = screenW / screenH
+
+        val displayedWidth: Float
+        val displayedHeight: Float
+        val horizontalCrop: Float
+        val verticalCrop: Float
+
+        if (screenAspect <= sourceAspect) {
+            // View is narrower than source: height fits exactly, horizontal sides are cropped
+            displayedHeight = screenH
+            displayedWidth = screenH * sourceAspect
+            horizontalCrop = ((displayedWidth - screenW) / 2f).coerceAtLeast(0f)
+            verticalCrop = 0f
+        } else {
+            // View is wider than source: width fits exactly, vertical top/bottom are cropped
+            displayedWidth = screenW
+            displayedHeight = screenW / sourceAspect
+            horizontalCrop = 0f
+            verticalCrop = ((displayedHeight - screenH) / 2f).coerceAtLeast(0f)
+        }
 
         detections.forEach { detection ->
             val box = detection.box_2d
@@ -56,9 +74,9 @@ fun DetectionOverlay(detections: List<DetectionResult>) {
 
             if (right <= left || bottom <= top) return@forEach
 
-            val topPx = top * screenH
+            val topPx = top * displayedHeight - verticalCrop
             val leftPx = left * displayedWidth - horizontalCrop
-            val bottomPx = bottom * screenH
+            val bottomPx = bottom * displayedHeight - verticalCrop
             val rightPx = right * displayedWidth - horizontalCrop
 
             val visibleLeft = leftPx.coerceIn(0f, screenW)

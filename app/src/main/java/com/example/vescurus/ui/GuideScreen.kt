@@ -29,7 +29,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.vescurus.GoldPrimary
-import com.example.vescurus.detector.OnDeviceYoloIngredientDetector
+import com.example.vescurus.detector.GeminiIngredientDetector
 import com.example.vescurus.model.DetectionResult
 import com.example.vescurus.network.ConnectionStatus
 import kotlinx.coroutines.Dispatchers
@@ -59,7 +59,7 @@ fun GuideScreen(
         )
     }
 
-    val detector = remember { OnDeviceYoloIngredientDetector(context.applicationContext) }
+    val detector = remember { GeminiIngredientDetector() }
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
@@ -179,7 +179,7 @@ fun GuideScreen(
 
 @Composable
 fun CameraPreview(
-    detector: OnDeviceYoloIngredientDetector,
+    detector: GeminiIngredientDetector,
     onDetectionsUpdated: (List<DetectionResult>) -> Unit,
     onFrameAvailable: (ByteArray) -> Unit
 ) {
@@ -189,8 +189,9 @@ fun CameraPreview(
     val analyzerExecutor = remember { Executors.newSingleThreadExecutor() }
     val scope = rememberCoroutineScope()
 
-    // YOLO runs locally, so sample frequently while preventing overlapping inferences.
-    val detectionIntervalMs = 150L
+    // Gemini cloud vision inference: ~1.2s interval to provide responsive updates
+    // while preventing overlapping in-flight network requests.
+    val detectionIntervalMs = 1200L
     val lastAnalysisTime = remember { AtomicLong(0L) }
     val isDetecting = remember { AtomicBoolean(false) }
     val consecutiveEmptyResults = remember { AtomicInteger(0) }
@@ -205,11 +206,15 @@ fun CameraPreview(
             cameraProviderFuture.addListener({
                 val cameraProvider = cameraProviderFuture.get()
 
-                val preview = Preview.Builder().build().also {
-                    it.setSurfaceProvider(previewView.surfaceProvider)
-                }
+                // Lock Preview and Analysis to 4:3 aspect ratio so field of view is identical
+                val preview = Preview.Builder()
+                    .setTargetAspectRatio(AspectRatio.RATIO_4_3)
+                    .build().also {
+                        it.setSurfaceProvider(previewView.surfaceProvider)
+                    }
 
                 val imageAnalysis = ImageAnalysis.Builder()
+                    .setTargetAspectRatio(AspectRatio.RATIO_4_3)
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .build()
                     .also { analysis ->
@@ -230,7 +235,7 @@ fun CameraPreview(
                                     true
                                 )
 
-                                // Keep the existing low-latency Guide -> Cook video feed.
+                                // Low-latency Guide -> Cook video feed.
                                 if (currentTime - lastFrameTime.get() >= 200L) {
                                     lastFrameTime.set(currentTime)
                                     val out = ByteArrayOutputStream()
@@ -238,7 +243,7 @@ fun CameraPreview(
                                     onFrameAvailable(out.toByteArray())
                                 }
 
-                                // Local YOLO inference: no Gemini/cloud call for CV.
+                                // Cloud Gemini object detection pipeline
                                 val last = lastAnalysisTime.get()
                                 val due = last == 0L || currentTime - last >= detectionIntervalMs
 
@@ -246,7 +251,7 @@ fun CameraPreview(
                                     lastAnalysisTime.set(currentTime)
                                     val scaledBitmap = uprightBitmap.scaleDown(640)
 
-                                    scope.launch(Dispatchers.Default) {
+                                    scope.launch(Dispatchers.IO) {
                                         try {
                                             val results = detector.detect(uprightBitmap, scaledBitmap)
 
@@ -263,7 +268,7 @@ fun CameraPreview(
                                                 }
                                             }
                                         } catch (e: Exception) {
-                                            Log.e("CV_FLOW", "On-device YOLO inference failed", e)
+                                            Log.e("CV_FLOW", "Gemini ingredient inference failed", e)
                                         } finally {
                                             isDetecting.set(false)
                                         }

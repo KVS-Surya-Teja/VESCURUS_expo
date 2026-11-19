@@ -173,8 +173,9 @@ class VescurusConnectionManager : ViewModel() {
         }.start(wait = false)
 
         registerService(port)
+        val ip = getLocalIpAddress()
         _status.value = ConnectionStatus.SEARCHING
-        _diagnostics.value = "Ktor server: RUNNING\nListening on port: $port"
+        _diagnostics.value = "Guide Server: RUNNING\n$ip:$port\nWaiting for Cook..."
     }
 
     private fun registerService(port: Int) {
@@ -423,6 +424,28 @@ class VescurusConnectionManager : ViewModel() {
                 }
             }
         }
+    }
+
+    fun connectDirectly(host: String, port: Int) {
+        connectToServer(host, port)
+    }
+
+    fun getLocalIpAddress(): String {
+        try {
+            val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val networkInterface = interfaces.nextElement()
+                val addresses = networkInterface.inetAddresses
+                while (addresses.hasMoreElements()) {
+                    val address = addresses.nextElement()
+                    if (!address.isLoopbackAddress && address is java.net.Inet4Address) {
+                        val hostAddress = address.hostAddress ?: continue
+                        if (!hostAddress.startsWith("127.")) return hostAddress
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return "127.0.0.1"
     }
 
     private fun findFreePort(): Int {

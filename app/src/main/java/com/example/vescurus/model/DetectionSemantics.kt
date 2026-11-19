@@ -14,6 +14,10 @@ fun canonicalizeIngredientLabel(rawLabel: String): String? {
         return "Unsupported object"
     }
 
+    if (normalized.contains("egg")) {
+        return "Egg"
+    }
+
     // Capitalize words cleanly for UI presentation (e.g. "chicken breast", "cherry tomato")
     return normalized.split(" ").joinToString(" ") { word ->
         word.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.US) else it.toString() }

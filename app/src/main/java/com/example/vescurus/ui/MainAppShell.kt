@@ -56,7 +56,7 @@ fun MainAppShell(
         }
     }
 
-    var selectedItem by remember { mutableStateOf(0) }
+    var selectedItem by remember { mutableStateOf(if (selectedRole == Role.GUIDE || selectedRole == Role.COOK) 1 else 0) }
     val items = listOf(NavItem.Home, NavItem.Cook, NavItem.Track, NavItem.Account)
 
     Scaffold(
@@ -120,18 +120,6 @@ fun MainAppShell(
                                 viewModel = cookViewModel,
                                 onBack = onResetRole
                             )
-
-                            // EMERGENCY MOCK BUTTON (Secretly hidden in bottom corner for Expo)
-                            if (selectedRole == Role.GUIDE && detections.isEmpty()) {
-                                Button(
-                                    onClick = {
-                                        val mock = listOf(com.example.vescurus.model.DetectionResult("egg", 0.99f, 2, com.example.vescurus.model.BoundingBox(0.3f, 0.3f, 0.6f, 0.6f), true))
-                                        connectionManager.broadcastDetection(mock)
-                                    },
-                                    modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp).size(40.dp).alpha(0.05f), // Almost invisible
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color.White)
-                                ) { }
-                            }
                         }
                     }
                     NavItem.Track -> TrackScreen(viewModel = cookViewModel)

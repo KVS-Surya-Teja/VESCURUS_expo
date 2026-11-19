@@ -40,7 +40,7 @@ class CookViewModel(application: Application) : AndroidViewModel(application), T
     private val recipeRepository = UniversalRecipeRepository()
 
     private val chatModel = GenerativeModel(
-        modelName = "gemini-2.5-flash",
+        modelName = "gemini-1.5-flash",
         apiKey = BuildConfig.GEMINI_API_KEY
     )
 
@@ -94,12 +94,24 @@ class CookViewModel(application: Application) : AndroidViewModel(application), T
         viewModelScope.launch {
             try {
                 isFetchingRecipes = true
-                Log.d(TAG, "Fetching dynamic recipes for ingredients: $ingredients")
-                val recipes = recipeRepository.generateRecipesForIngredients(ingredients)
-                _availableRecipes.value = recipes
-                speak("I've generated recipes based on your detected ingredients: ${ingredients.joinToString(", ")}. What would you like to make?")
+                Log.d(TAG, "Fetching recipes for ingredients: $ingredients")
+                val hasEgg = ingredients.any { it.equals("egg", ignoreCase = true) }
+                if (hasEgg) {
+                    // V0 scope: Guarantee the four core egg dish families
+                    _availableRecipes.value = EGG_RECIPES
+                    speak("I've detected egg! Four dishes are ready: Omelette, Scrambled Eggs, Sunny Side-Up, or Pancakes. Which would you like to make?")
+                } else {
+                    val recipes = recipeRepository.generateRecipesForIngredients(ingredients)
+                    if (recipes.isNotEmpty()) {
+                        _availableRecipes.value = recipes
+                    }
+                    speak("I've generated recipes based on your detected ingredients: ${ingredients.joinToString(", ")}. What would you like to make?")
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to fetch recipes: ${e.message}")
+                if (_availableRecipes.value.isEmpty()) {
+                    _availableRecipes.value = EGG_RECIPES
+                }
             } finally {
                 isFetchingRecipes = false
             }

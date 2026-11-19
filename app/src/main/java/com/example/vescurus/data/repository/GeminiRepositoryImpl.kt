@@ -197,14 +197,18 @@ class GeminiRepositoryImpl : IngredientRepository {
                 box
             }
 
-            if (normalized.ymin < 0f || normalized.xmin < 0f ||
-                normalized.ymax > 1f || normalized.xmax > 1f ||
-                normalized.ymax <= normalized.ymin || normalized.xmax <= normalized.xmin
-            ) return@mapNotNull null
+            val clamped = BoundingBox(
+                ymin = normalized.ymin.coerceIn(0f, 1f),
+                xmin = normalized.xmin.coerceIn(0f, 1f),
+                ymax = normalized.ymax.coerceIn(0f, 1f),
+                xmax = normalized.xmax.coerceIn(0f, 1f)
+            )
+
+            if (clamped.ymax <= clamped.ymin || clamped.xmax <= clamped.xmin) return@mapNotNull null
 
             detection.copy(
                 label = rawLabel,
-                box_2d = normalized,
+                box_2d = clamped,
                 is_supported = true
             )
         }
