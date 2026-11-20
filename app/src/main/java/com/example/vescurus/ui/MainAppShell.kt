@@ -100,9 +100,6 @@ fun MainAppShell(
                 when (items[selectedItem]) {
                     NavItem.Home -> PlaceholderScreen("Welcome to VESCURUS Home")
                     NavItem.Cook -> {
-                        // Diagnostic: Force detection if stuck for demo
-                        var showForceButton by remember { mutableStateOf(false) }
-                        
                         Box(modifier = Modifier.fillMaxSize()) {
                             RoleSpecificCookScreen(
                                 selectedRole = selectedRole,
@@ -117,6 +114,9 @@ fun MainAppShell(
                                     connectionManager.broadcastFrame(frameBytes)
                                 },
                                 onSnapshot = { connectionManager.sendSnapshotCommand() },
+                                onDirectConnect = { ip, port ->
+                                    connectionManager.connectDirectly(ip, port)
+                                },
                                 viewModel = cookViewModel,
                                 onBack = onResetRole
                             )
@@ -187,6 +187,7 @@ fun RoleSpecificCookScreen(
     onBroadcastDetection: (List<DetectionResult>) -> Unit,
     onBroadcastFrame: (ByteArray) -> Unit,
     onSnapshot: () -> Unit,
+    onDirectConnect: (String, Int) -> Unit,
     viewModel: CookViewModel,
     onBack: () -> Unit
 ) {
@@ -197,7 +198,6 @@ fun RoleSpecificCookScreen(
                 diagnostics = diagnostics,
                 detections = detections,
                 onDetectionsUpdated = {
-                    // This updates both local Guide state and triggers broadcast
                     onBroadcastDetection(it)
                 },
                 onFrameAvailable = onBroadcastFrame,
@@ -211,7 +211,8 @@ fun RoleSpecificCookScreen(
                 detections = detections,
                 latestFrame = latestFrame,
                 viewModel = viewModel,
-                onSnapshot = onSnapshot
+                onSnapshot = onSnapshot,
+                onDirectConnect = onDirectConnect
             )
         }
         Role.DEMONSTRATE -> PlaceholderScreen("DEMO UI - Explore VESCURUS")

@@ -42,9 +42,13 @@ fun CookScreen(
     detections: List<DetectionResult>,
     latestFrame: ByteArray?,
     viewModel: CookViewModel,
-    onSnapshot: () -> Unit
+    onSnapshot: () -> Unit,
+    onDirectConnect: (String, Int) -> Unit = { _, _ -> }
 ) {
     var isVisionHudEnabled by remember { mutableStateOf(true) }
+    var showDirectConnectDialog by remember { mutableStateOf(false) }
+    var ipInput by remember { mutableStateOf("192.168.43.1") }
+    var portInput by remember { mutableStateOf("8080") }
 
     // Collect all valid detected food items
     val detectedIngredients = remember(detections) {
@@ -139,14 +143,68 @@ fun CookScreen(
                 }
             }
 
-            // Connection Diagnostic Label
+            // Connection Diagnostic Label & Direct Connect Trigger
             if (status != ConnectionStatus.CONNECTED) {
-                Text(
-                    text = "STATUS: $diagnostics",
-                    color = Color.Yellow,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.align(Alignment.BottomStart).padding(12.dp)
+                Row(
+                    modifier = Modifier.align(Alignment.BottomStart).padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "STATUS: $diagnostics",
+                        color = Color.Yellow,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = { showDirectConnectDialog = true },
+                        modifier = Modifier.height(28.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary)
+                    ) {
+                        Text("Connect IP", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            if (showDirectConnectDialog) {
+                AlertDialog(
+                    onDismissRequest = { showDirectConnectDialog = false },
+                    title = { Text("Direct IP Connection", color = Color.White) },
+                    text = {
+                        Column {
+                            Text("Enter the Guide's IP address and Port displayed on the Guide screen:", color = Color.LightGray, fontSize = 12.sp)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = ipInput,
+                                onValueChange = { ipInput = it },
+                                label = { Text("Guide IP") },
+                                singleLine = true
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = portInput,
+                                onValueChange = { portInput = it },
+                                label = { Text("Port") },
+                                singleLine = true
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Button(onClick = {
+                            val port = portInput.toIntOrNull() ?: 8080
+                            onDirectConnect(ipInput.trim(), port)
+                            showDirectConnectDialog = false
+                        }) {
+                            Text("Connect")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showDirectConnectDialog = false }) {
+                            Text("Cancel", color = Color.Gray)
+                        }
+                    },
+                    containerColor = Color(0xFF1E293B)
                 )
             }
             

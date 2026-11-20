@@ -1,6 +1,7 @@
 package com.example.vescurus.network
 
 import android.content.Context
+import android.net.wifi.WifiManager
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.util.Log
@@ -41,14 +42,7 @@ enum class ConnectionStatus {
 class VescurusConnectionManager : ViewModel() {
     private val TAG = "VescurusNet"
     
-    /**
-     * EXPO NETWORKING STRATEGY:
-     * To bypass congested Expo Wi-Fi, the Guide should ideally enable its Mobile Hotspot.
-     * The Cook phone connects to this Hotspot. 
-     * P2P Telemetry (WebSockets) then runs entirely over the local Hotspot LAN.
-     * Only the Guide's Gemini API requests touch the public WAN.
-     */
-    private val SERVICE_TYPE = "_vescurus._tcp."
+    private val SERVICE_TYPE = "_vescurus._tcp"
     private val SERVICE_NAME = "VESCURUS-GUIDE"
     private val HANDSHAKE_INIT = "VESCURUS_HANDSHAKE_INIT"
     private val HANDSHAKE_OK = "VESCURUS_HANDSHAKE_OK|GUIDE-01"
@@ -82,6 +76,7 @@ class VescurusConnectionManager : ViewModel() {
     private var nsdManager: NsdManager? = null
     private var registrationListener: NsdManager.RegistrationListener? = null
     private var discoveryListener: NsdManager.DiscoveryListener? = null
+    private var multicastLock: WifiManager.MulticastLock? = null
 
     private var reconnectionJob: Job? = null
     private var reconnectAttempt = 0
@@ -97,6 +92,18 @@ class VescurusConnectionManager : ViewModel() {
         }
         currentRole = role
         Log.d(TAG, "Starting connection manager for role: $role")
+
+        // Acquire Multicast lock to ensure mDNS discovery packets are not dropped
+        try {
+            val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            multicastLock = wifi?.createMulticastLock("VescurusMulticastLock")?.apply {
+                setReferenceCounted(true)
+                acquire()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not acquire MulticastLock: ${e.message}")
+        }
+
         nsdManager = context.getSystemService(Context.NSD_SERVICE) as NsdManager
 
         when (role) {
@@ -114,6 +121,16 @@ class VescurusConnectionManager : ViewModel() {
         client?.close()
         unregisterService()
         stopDiscovery()
+
+        try {
+            multicastLock?.let {
+                if (it.isHeld) it.release()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error releasing MulticastLock: ${e.message}")
+        }
+        multicastLock = null
+
         _status.value = ConnectionStatus.IDLE
         _diagnostics.value = ""
         _latestFrame.value = null
@@ -125,8 +142,10 @@ class VescurusConnectionManager : ViewModel() {
     // --- SERVER (GUIDE) ---
     private fun startServer() {
         val port = findFreePort()
-        Log.d(TAG, "[WS] Starting Server on port $port")
-        server = embeddedServer(Netty, port = port) {
+        val ip = getLocalIpAddress()
+        Log.d(TAG, "[WS] Starting Netty Server on 0.0.0.0:$port (Local IP: $ip)")
+
+        server = embeddedServer(Netty, host = "0.0.0.0", port = port) {
             install(io.ktor.server.websocket.WebSockets) {
                 pingPeriod = java.time.Duration.ofMillis(WS_PING_INTERVAL_MS)
                 timeout = java.time.Duration.ofMillis(WS_TIMEOUT_MS)
@@ -149,7 +168,7 @@ class VescurusConnectionManager : ViewModel() {
                                     text.startsWith("VESCURUS_HANDSHAKE_FIN") -> {
                                         _status.value = ConnectionStatus.CONNECTED
                                         Log.d(TAG, "[WS] Handshake complete. Cook connected.")
-                                        _diagnostics.value = "Cook connected"
+                                        _diagnostics.value = "Cook connected ($ip:$port)"
                                     }
                                     text == CMD_TAKE_SNAPSHOT -> {
                                         Log.d(TAG, "[WS] Take Snapshot command received")
@@ -173,9 +192,8 @@ class VescurusConnectionManager : ViewModel() {
         }.start(wait = false)
 
         registerService(port)
-        val ip = getLocalIpAddress()
         _status.value = ConnectionStatus.SEARCHING
-        _diagnostics.value = "Guide Server: RUNNING\n$ip:$port\nWaiting for Cook..."
+        _diagnostics.value = "Guide IP: $ip:$port\nWaiting for Cook..."
     }
 
     private fun registerService(port: Int) {
@@ -237,8 +255,10 @@ class VescurusConnectionManager : ViewModel() {
                 Log.d(TAG, "[NSD] Discovery stopped")
             }
             override fun onServiceFound(serviceInfo: NsdServiceInfo) {
-                Log.d(TAG, "[NSD] Service found: ${serviceInfo.serviceName}")
-                if (serviceInfo.serviceType == SERVICE_TYPE && serviceInfo.serviceName == SERVICE_NAME) {
+                Log.d(TAG, "[NSD] Service found: name=${serviceInfo.serviceName}, type=${serviceInfo.serviceType}")
+                val isMatch = serviceInfo.serviceType.contains("_vescurus._tcp") && 
+                              serviceInfo.serviceName.contains("VESCURUS")
+                if (isMatch) {
                     _status.value = ConnectionStatus.FOUND
                     nsdManager?.resolveService(serviceInfo, object : NsdManager.ResolveListener {
                         override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
@@ -246,9 +266,13 @@ class VescurusConnectionManager : ViewModel() {
                             _diagnostics.value = "Resolve Failed: $errorCode"
                         }
                         override fun onServiceResolved(resolvedServiceInfo: NsdServiceInfo) {
-                            val hostAddress = resolvedServiceInfo.host?.hostAddress
+                            var hostAddress = resolvedServiceInfo.host?.hostAddress
                             val port = resolvedServiceInfo.port
                             if (hostAddress != null) {
+                                // Strip IPv6 scope if present
+                                if (hostAddress.contains("%")) {
+                                    hostAddress = hostAddress.substringBefore("%")
+                                }
                                 Log.d(TAG, "[NSD] Service resolved: $hostAddress:$port")
                                 _diagnostics.value = "Found Guide at $hostAddress:$port"
                                 connectToServer(hostAddress, port)
@@ -259,7 +283,7 @@ class VescurusConnectionManager : ViewModel() {
             }
             override fun onServiceLost(serviceInfo: NsdServiceInfo) {
                 Log.d(TAG, "[NSD] Service lost: ${serviceInfo.serviceName}")
-                if (serviceInfo.serviceName == SERVICE_NAME) {
+                if (serviceInfo.serviceName.contains("VESCURUS")) {
                     _diagnostics.value = "Guide unavailable"
                     if (_status.value == ConnectionStatus.CONNECTED) {
                         _status.value = ConnectionStatus.LOST
@@ -270,10 +294,16 @@ class VescurusConnectionManager : ViewModel() {
         nsdManager?.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
     }
 
-    private fun connectToServer(host: String, port: Int) {
+    fun connectToServer(host: String, port: Int) {
         if (!isRunning.get()) return
+        
+        var cleanHost = host.trim()
+        if (cleanHost.contains("%")) {
+            cleanHost = cleanHost.substringBefore("%")
+        }
+
         _status.value = ConnectionStatus.CONNECTING
-        _diagnostics.value = "Connecting to $host:$port"
+        _diagnostics.value = "Connecting to $cleanHost:$port"
         
         client?.close()
         client = HttpClient(CIO) {
@@ -284,8 +314,8 @@ class VescurusConnectionManager : ViewModel() {
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                Log.d(TAG, "[WS] Connecting to $host:$port/ws")
-                client?.webSocket(method = HttpMethod.Get, host = host, port = port, path = "/ws") {
+                Log.d(TAG, "[WS] Connecting to $cleanHost:$port/ws")
+                client?.webSocket(method = HttpMethod.Get, host = cleanHost, port = port, path = "/ws") {
                     Log.d(TAG, "[WS] Connected. Starting handshake.")
                     activeClientSession = this
                     _diagnostics.value = "Handshaking..."

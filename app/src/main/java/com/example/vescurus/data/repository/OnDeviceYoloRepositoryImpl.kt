@@ -19,11 +19,11 @@ import java.util.Collections
 /**
  * On-device YOLO-World v2 inference through ONNX Runtime.
  *
- * The exported model has a baked food vocabulary, so Android does not need
- * Gemini, a laptop, or a text-embedding model for CV. The same pipeline can
- * therefore recognize any class in FOOD_CLASSES, not just eggs.
+ * If app/src/main/assets/yolo_food.onnx exists, runs hardware-accelerated local ONNX inference.
+ * If the model asset is absent, falls back to Gemini Open-World Vision Engine to ensure 
+ * ingredient detection works reliably out-of-the-box.
  *
- * Model asset: app/src/main/assets/yolo_food.onnx
+ * Model asset location: app/src/main/assets/yolo_food.onnx
  */
 class OnDeviceYoloRepositoryImpl(
     private val context: Context,
@@ -31,13 +31,12 @@ class OnDeviceYoloRepositoryImpl(
 ) : IngredientRepository {
 
     private val tag = "OnDeviceYoloRepo"
+    private val fallbackCloud = GeminiRepositoryImpl()
     private var env: OrtEnvironment? = null
     private var session: OrtSession? = null
     private var isInitialized = false
 
     companion object {
-        // Keep this vocabulary broad enough for V0 while remaining practical
-        // for a single baked YOLO-World ONNX model.
         val FOOD_CLASSES = listOf(
             "egg", "tomato", "onion", "green chili", "banana", "chicken breast",
             "broccoli", "bread", "cheese", "apple", "potato", "garlic", "bell pepper",
@@ -62,7 +61,7 @@ class OnDeviceYoloRepositoryImpl(
             isInitialized = true
             Log.d(tag, "Loaded on-device YOLO food model from assets/$modelFileName")
         } catch (e: Exception) {
-            Log.w(tag, "Missing YOLO model asset: assets/$modelFileName", e)
+            Log.w(tag, "YOLO model asset assets/$modelFileName not present. Will use Gemini Cloud Engine fallback.")
             isInitialized = false
         }
     }
@@ -74,7 +73,8 @@ class OnDeviceYoloRepositoryImpl(
         val localEnv = env
         val localSession = session
         if (!isInitialized || localEnv == null || localSession == null) {
-            return@withContext AnalysisResponse("ondevice-no-model", emptyList(), 0f)
+            Log.d(tag, "Routing frame to fallback vision engine")
+            return@withContext fallbackCloud.analyzeIngredients(rawBitmap, scaledBitmap)
         }
 
         try {
@@ -85,7 +85,7 @@ class OnDeviceYoloRepositoryImpl(
             OnnxTensor.createTensor(localEnv, floatBuffer, inputShape).use { inputTensor ->
                 localSession.run(Collections.singletonMap("images", inputTensor)).use { results ->
                     val outputTensor = results.get(0) as? OnnxTensor
-                        ?: return@withContext AnalysisResponse("ondevice-error", emptyList(), 0f)
+                        ?: return@withContext fallbackCloud.analyzeIngredients(rawBitmap, scaledBitmap)
 
                     outputTensor.use { tensor ->
                         val shape = tensor.info.shape
@@ -108,8 +108,8 @@ class OnDeviceYoloRepositoryImpl(
                 }
             }
         } catch (e: Exception) {
-            Log.e(tag, "ONNX inference error", e)
-            AnalysisResponse("ondevice-exception", emptyList(), 0f)
+            Log.e(tag, "ONNX inference error, falling back", e)
+            fallbackCloud.analyzeIngredients(rawBitmap, scaledBitmap)
         }
     }
 
@@ -144,8 +144,6 @@ class OnDeviceYoloRepositoryImpl(
         val numClasses = rows - 4
         if (numClasses < 1 || output.size < rows * anchors) return emptyList()
 
-        // High recall is intentional for V0. UI/FSM decides what constitutes
-        // a supported ingredient; CV should not silently discard weak targets.
         val confThreshold = 0.15f
         val iouThreshold = 0.45f
         val candidates = mutableListOf<RawDetection>()
@@ -211,8 +209,6 @@ class OnDeviceYoloRepositoryImpl(
         val selected = mutableListOf<RawDetection>()
 
         for (candidate in sorted) {
-            // Different food classes may legitimately overlap (e.g. egg on bread),
-            // so suppress only overlapping boxes of the same class.
             if (selected.none {
                     it.label == candidate.label && computeIou(candidate.box, it.box) > iouThreshold
                 }) {
