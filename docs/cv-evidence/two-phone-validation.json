@@ -274,7 +274,7 @@
     }
   },
   "latestSoftwareBuild": {
-    "apkSha256": "2b08a41b4b1de78e5f70f836d8f7756d420611dff615893e392b5affcdba3b7e",
+    "apkSha256": "8049079e4654d70c339bbcbe6dcf2c9cc038d08eb1d0e385baa5652e2a16c946",
     "installedOnPhones": false,
     "reason": "User intentionally disconnected both phones before the final UI and request-ownership changes.",
     "jvmTests": 53,
@@ -282,11 +282,11 @@
     "androidTestsLastPhysicalPass": 7,
     "figmaDesign": "https://www.figma.com/design/Zcx3aNpssrtaWoefR8OLJJ",
     "hardwareScaleAvailable": false,
-    "ciUrl": "https://github.com/KVS-Surya-Teja/VESCURUS_expo/actions/runs/45034882959",
-    "verifiedAppRevision": "b9fb8844c2bf9559783bdb0aec91dc4931959e5a",
-    "androidEmulatorPassed": 8,
+    "ciUrl": "https://github.com/KVS-Surya-Teja/VESCURUS_expo/actions/runs/45055493437",
+    "verifiedAppRevision": "6a153938b088f586ebf3cd694a0c31a621ca9415",
+    "androidEmulatorPassed": 11,
     "androidEmulatorSkipped": 1,
-    "ciArtifactSha256": "fb55dbc01d1a67c4f6df4cee1ee7b737bedf00fce11ce6cdb8ce12fe4716fe8f",
+    "ciArtifactSha256": "247f96c860763803e1e531934ba97362c5b0ef698f9cc5cec3f58b74f464b2ce",
     "textEndpointFinalHealth": {
       "httpStatus": 200,
       "reply": "Ready.",
@@ -403,6 +403,21 @@
       "httpStatus": 200,
       "latencyMs": 2820,
       "note": "Same configured model, bounded1024-token response. Recalled Apple Slices with unknown quantity; asked a contextual clarification. Not a new physical-phone check."
+    },
+    "orientationChecks": {
+      "viewportsDp": [
+        "360x720",
+        "800x360"
+      ],
+      "passed": 3,
+      "covers": [
+        "original SVG startup rendering",
+        "role picker and passive Guide",
+        "camera/HUD and draft retention",
+        "ingredient actions",
+        "Track and Settings navigation"
+      ],
+      "physicalRotationVerified": false
     }
   }
 }

@@ -89,8 +89,20 @@ not presented as Spoonacular results or measured food intake.
 
 The current changes start from remote `759002f`, preserving its startup entrance,
 Kotlin/Compose architecture, recent conversation context and session/CV integrity.
-The camera and chat remain central. The contained camera uses about one third of
-the idle viewport, collapses for the keyboard and keeps Live/Last scan separate.
+The startup now uses the user's original `VESCURUS_with_text_to_the_right.svg`
+(source retained in `app/src/main/artwork/`). Its paths and Cambria wordmark are
+outlined into `vescurus_startup_brand.xml`; no replacement logo or rendered glow.
+The launch window, system bars and entrance background are pure black. The
+original 0.8→1 zoom/fade (1000 ms), 2200 ms hold and 600 ms transition remain.
+The full lockup fits the safe viewport in either orientation; no duplicate title
+or tagline is added.
+The camera and chat remain central. The restored full-width camera uses about
+44% of the idle portrait viewport (36% while cooking), with rounded lower corners
+and overlaid controls. The visible **AI HUD** switch shows/hides detection boxes
+on the matching Last scan image; it does not put stale boxes over live video.
+In landscape (at least 600 dp wide), camera and assistant use side-by-side panes.
+The camera collapses for the keyboard; draft text and HUD state survive viewport
+changes. Portrait and landscape keep Live/Last scan separate.
 Tabs and navigation have less visual weight;
 the pre-cooking recipe is a compact card. Ingredient correction/removal live
 inside the overflow menu; recording an ingredient and confirming physical transfer
@@ -235,7 +247,7 @@ in the final verification below; the engine change is not itself proof of succes
 
 ### Final verification gate
 
-Latest local debug APK available for later installation: `2b08a41b4b1de78e5f70f836d8f7756d420611dff615893e392b5affcdba3b7e`.
+Latest local debug APK available for later installation: `8049079e4654d70c339bbcbe6dcf2c9cc038d08eb1d0e385baa5652e2a16c946`.
 
 Last physically installed debug APK SHA-256 (both devices, before disconnection):
 `bef216dd77a0078a57f71de5e6adc7ad7d2121d948afb17f82b3e96fd7d4e0b2`.
@@ -253,12 +265,23 @@ The preparation-only revision/audit correction, later UI refinement and recipe-j
 ownership fixes were added afterward. The user intentionally disconnected both
 phones; the newest APK needs later physical installation/recheck. Two additional
 Android regression cases cover late recipe replies and starting cooking while a
-planner is pending. The [successful GitHub gate](https://github.com/KVS-Surya-Teja/VESCURUS_expo/actions/runs/45034882959)
-verified application revision `b9fb8844c2bf9559783bdb0aec91dc4931959e5a`: **53 JVM
-tests; 8 Android tests passed, 1 optional installed-voice test skipped** on API 35;
+planner is pending. The [successful GitHub gate](https://github.com/KVS-Surya-Teja/VESCURUS_expo/actions/runs/45055493437)
+verified application revision `6a153938b088f586ebf3cd694a0c31a621ca9415`: **53 JVM
+tests; 11 Android tests passed, 1 optional installed-voice test skipped** on API 35;
 app/test APK builds and lint completed with 0 errors. The real voice generation
 pass belongs to Samsung, not that emulator skip. The downloaded CI artifact was
-verified against SHA-256 `fb55dbc01d1a67c4f6df4cee1ee7b737bedf00fce11ce6cdb8ce12fe4716fe8f`.
+verified against SHA-256 `247f96c860763803e1e531934ba97362c5b0ef698f9cc5cec3f58b74f464b2ce`.
+
+Three additional Android tests exercise 360×720 and 800×360 dp configurations:
+startup/role selection/Guide, camera and AI HUD plus retained chat draft and ingredient
+actions, and Track/Settings navigation. These are controlled Compose viewport tests,
+not physical rotation or camera sensor checks on the disconnected phones. The
+viewport-only fixture captures include the host emulator's unused white area and
+system bars; those areas are outside the tested app viewport.
+[Startup portrait fixture](ui-review/startup-portrait-ci.png),
+[startup landscape fixture](ui-review/startup-landscape-ci.png),
+[Cook landscape fixture](ui-review/cook-landscape-ci.png),
+[Guide landscape fixture](ui-review/guide-landscape-ci.png).
 
 Latest native CI screens, using real Compose components and isolated fixtures:
 [Cook](ui-review/cook-current-ci.png),
