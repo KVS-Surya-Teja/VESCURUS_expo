@@ -46,7 +46,7 @@ class MainActivity : ComponentActivity() {
             VESCURUSTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = BlackBackground
+                    color = Color.Black
                 ) {
                     VESCURUSApp()
                 }
@@ -117,54 +117,15 @@ fun SplashScreen(onTimeout: () -> Unit) {
     }
 
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                Brush.radialGradient(
-                    colors = listOf(
-                        Color(0xFF1E293B),
-                        Color(0xFF020617)
-                    )
-                )
-            ),
+        modifier = Modifier.fillMaxSize().background(Color.Black).safeDrawingPadding(),
         contentAlignment = Alignment.Center
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-            modifier = Modifier.graphicsLayer(
-                alpha = alphaAnim,
-                scaleX = scaleAnim,
-                scaleY = scaleAnim
-            )
-        ) {
-            Image(
-                painter = painterResource(id = R.drawable.ic_vescurus_logo),
-                contentDescription = "VESCURUS Logo",
-                modifier = Modifier
-                    .size(200.dp)
-                    .padding(16.dp)
-            )
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            Text(
-                text = "VESCURUS",
-                color = GoldPrimary,
-                fontSize = 32.sp,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 6.sp
-            )
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            Text(
-                text = "PREPARE / COOK / REMEMBER",
-                color = Color.White.copy(alpha = 0.7f),
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 3.sp
-            )
-        }
+        Image(
+            painter = painterResource(R.drawable.vescurus_startup_brand),
+            contentDescription = "VESCURUS",
+            contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+            modifier = Modifier.fillMaxSize().padding(horizontal = 36.dp, vertical = 28.dp)
+                .graphicsLayer(alpha = alphaAnim, scaleX = scaleAnim, scaleY = scaleAnim)
+        )
     }
 }

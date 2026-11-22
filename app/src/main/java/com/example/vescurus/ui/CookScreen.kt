@@ -38,6 +38,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -126,6 +127,7 @@ fun CookScreen(
     var editor by remember { mutableStateOf<EntryEditor?>(null) }
     var connect by rememberSaveable { mutableStateOf(false) }
     var cameraCollapsed by rememberSaveable { mutableStateOf(false) }
+    var visionHudEnabled by rememberSaveable { mutableStateOf(true) }
     var analyzed by rememberSaveable { mutableStateOf(false) }
     var workspace by rememberSaveable { mutableIntStateOf(0) }
     var showGuides by rememberSaveable { mutableStateOf(false) }
@@ -268,21 +270,24 @@ fun CookScreen(
         val availableHeight = maxHeight
         val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
         val tightWorkspace = availableHeight < 360.dp
+        val sideBySide = maxWidth > maxHeight && maxWidth >= 600.dp && !keyboardVisible
         // Keep the composer and current task usable in landscape and when the keyboard opens.
-        val compactCamera = cameraCollapsed || keyboardVisible || availableHeight < 500.dp
+        val compactCamera = cameraCollapsed || keyboardVisible || (!sideBySide && availableHeight < 500.dp)
         val cameraHeight by animateDpAsState(
-            targetValue = if (compactCamera) 52.dp else (availableHeight * if (viewModel.cookingState == CookingState.COOKING) .28f else .34f).coerceIn(180.dp, 280.dp),
+            targetValue = if (compactCamera) 52.dp else (availableHeight * if (viewModel.cookingState == CookingState.COOKING) .36f else .44f).coerceIn(210.dp, 360.dp),
             animationSpec = tween(180),
             label = "camera-height"
         )
 
-        Column(Modifier.fillMaxSize()) {
+        CookPanes(sideBySide, camera = {
             if (!viewModel.isDemo && !(keyboardVisible && tightWorkspace)) {
                 GuideCameraHero(
                     status = status,
                     diagnostics = diagnostics,
                     observation = observation,
                     analyzed = analyzed,
+                    hudEnabled = visionHudEnabled,
+                    onHudChange = { visionHudEnabled = it },
                     collapsed = compactCamera,
                     latestFrameFlow = latestFrameFlow,
                     latestFrame = latestFrame,
@@ -292,11 +297,12 @@ fun CookScreen(
                     recognizing = viewModel.recognitionInProgress,
                     primaryRecognition = recipe == null && !ingredientReviewed && observations.isEmpty(),
                     onToggleSize = { cameraCollapsed = !cameraCollapsed },
-                    canExpand = !keyboardVisible && availableHeight >= 500.dp,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).height(cameraHeight)
+                    canExpand = !keyboardVisible && (sideBySide || availableHeight >= 500.dp),
+                    modifier = Modifier.fillMaxWidth().height(if (sideBySide) availableHeight else cameraHeight)
                 )
             }
 
+        }) {
             if (!tightWorkspace && (recipe == null || workspace != 0)) Row(
                 Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -585,12 +591,30 @@ private fun WorkspaceTabs(selected: Int, onSelect: (Int) -> Unit) {
     }
 }
 
+/** In landscape, keep the feed visible beside the scrollable task and composer. */
+@Composable
+private fun CookPanes(
+    landscape: Boolean,
+    camera: @Composable () -> Unit,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    if (landscape) Row(Modifier.fillMaxSize()) {
+        Box(Modifier.weight(.42f).fillMaxHeight()) { camera() }
+        Column(Modifier.weight(.58f).fillMaxHeight(), content = content)
+    } else Column(Modifier.fillMaxSize()) {
+        camera()
+        Column(Modifier.weight(1f).fillMaxWidth(), content = content)
+    }
+}
+
 @Composable
 private fun GuideCameraHero(
     status: ConnectionStatus,
     diagnostics: String,
     observation: Observation?,
     analyzed: Boolean,
+    hudEnabled: Boolean,
+    onHudChange: (Boolean) -> Unit,
     collapsed: Boolean,
     latestFrameFlow: StateFlow<ByteArray?>?,
     latestFrame: ByteArray?,
@@ -621,12 +645,14 @@ private fun GuideCameraHero(
         status == ConnectionStatus.FOUND -> "Camera found"
         else -> "Ready to connect"
     }
-    Column(
-        modifier.clip(RoundedCornerShape(20.dp))
-            .background(SurfaceNavy)
+    Box(
+        modifier.clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))
+            .background(Color.Black)
     ) {
         Row(
-            Modifier.fillMaxWidth().height(44.dp).padding(start = 16.dp, end = 6.dp),
+            Modifier.align(Alignment.TopCenter).fillMaxWidth().height(52.dp)
+                .background(Color.Black.copy(alpha = .65f)).then(Modifier.zIndex(1f))
+                .padding(start = 12.dp, end = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(9.dp)
         ) {
@@ -637,7 +663,14 @@ private fun GuideCameraHero(
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
 
             }
-            TextButton(onClick = onConnect, modifier = Modifier.testTag("guide-connect")) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("AI HUD", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Switch(checked = hudEnabled, onCheckedChange = onHudChange,
+                    modifier = Modifier.testTag("ai-hud-toggle"),
+                    colors = SwitchDefaults.colors(checkedThumbColor = GoldPrimary,
+                        checkedTrackColor = GoldPrimary.copy(alpha = .35f)))
+            }
+            IconButton(onClick = onConnect, modifier = Modifier.testTag("guide-connect")) {
                 Icon(if (connected) Icons.Default.Link else Icons.Default.LinkOff, if (connected) "Pairing details" else "Connect camera phone", tint = if (connected) Muted else GoldPrimary, modifier = Modifier.size(20.dp))
             }
             IconButton(
@@ -653,9 +686,9 @@ private fun GuideCameraHero(
             }
         }
         if (!collapsed) {
-            Box(Modifier.fillMaxWidth().weight(1f).background(Color.Black)) {
+            Box(Modifier.fillMaxSize().background(Color.Black)) {
                 if (analyzed) {
-                    ObservationPanel(observation, Modifier.fillMaxSize())
+                    ObservationPanel(observation, Modifier.fillMaxSize().padding(top = 52.dp, bottom = 44.dp), showDetections = hudEnabled)
                 } else {
                     LiveGuideFrame(latestFrameFlow, latestFrame, connected, Modifier.fillMaxSize())
                 }
@@ -663,7 +696,7 @@ private fun GuideCameraHero(
                     FilledTonalButton(
                         onClick = onRecognize,
                         enabled = !recognizing,
-                        modifier = Modifier.align(Alignment.BottomCenter).padding(10.dp)
+                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 54.dp, top = 10.dp)
                             .testTag("recognize-ingredients"),
                         colors = ButtonDefaults.filledTonalButtonColors(
                             containerColor = if (primaryRecognition) GoldPrimary else SurfaceNavy.copy(alpha = .94f),
@@ -681,7 +714,8 @@ private fun GuideCameraHero(
                 }
             }
             Row(
-                Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 12.dp, vertical = 3.dp),
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(44.dp)
+                    .background(Color.Black.copy(alpha = .65f)).padding(horizontal = 12.dp, vertical = 3.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {

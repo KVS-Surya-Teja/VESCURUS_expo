@@ -32,7 +32,8 @@ import com.example.vescurus.model.Observation
 fun ObservationPanel(
     observation: Observation?,
     modifier: Modifier = Modifier,
-    isAnalyzing: Boolean = false
+    isAnalyzing: Boolean = false,
+    showDetections: Boolean = true
 ) {
     val bitmap = remember(observation?.streamId, observation?.frameId) {
         observation?.let { runCatching {
@@ -73,7 +74,7 @@ fun ObservationPanel(
                 if (successful && recognizedNames.isNotEmpty()) "Scanned photo. Recognized food: ${recognizedNames.joinToString(", ")}."
                 else "Scanned food photo. $statusText.",
                 Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
-            if (observation.status == "SUCCESS") DetectionOverlay(observation.detections, observation.width, observation.height, fitImage=true)
+            if (showDetections && observation.status == "SUCCESS") DetectionOverlay(observation.detections, observation.width, observation.height, fitImage=true)
         } else {
             Column(
                 modifier = Modifier.align(Alignment.Center).padding(horizontal = 18.dp),
@@ -86,7 +87,7 @@ fun ObservationPanel(
                     Icon(Icons.Default.CameraAlt, null, tint = GoldPrimary.copy(alpha = .8f), modifier = Modifier.size(27.dp))
                 }
                 Text(
-                    if (isAnalyzing) "Looking at your food…" else if (observation == null) "Tap Recognize food\non the camera phone" else statusText,
+                    if (isAnalyzing) "Looking at your food…" else if (observation == null) "Tap Identify ingredient\non your cooking phone" else statusText,
                     color = Color(0xFFB6C3D4), fontSize = 12.sp,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                     maxLines = 2, overflow = TextOverflow.Ellipsis
