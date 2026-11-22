@@ -6,6 +6,8 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.vescurus.data.local.LocalState
 import com.example.vescurus.data.local.SessionStore
+import com.example.vescurus.model.BUILT_IN_RECIPES
+import com.example.vescurus.model.RecipeNutrient
 import com.example.vescurus.session.CookingSession
 import com.example.vescurus.session.SessionChatMessage
 import com.example.vescurus.ui.CookViewModel
@@ -26,7 +28,9 @@ class TrackMirroringUiTest {
             historyTitle = "Original local dish", version = 1)
         val newer = original.copy(version = 2, updatedAt = 2000, historyTitle = "Updated dish")
         val peer = CookingSession(id = "peer-record", completedAt = 3000, updatedAt = 3000,
-            historyTitle = "Peer dish", conversation = listOf(
+            historyTitle = "Peer dish", recipe = BUILT_IN_RECIPES.first().copy(source = "Nutrition test fixture",
+                nutrients = listOf(RecipeNutrient("Vitamin B12", .003, "µg"), RecipeNutrient("Calcium", 1000.0, "mg"))),
+            conversation = listOf(
                 SessionChatMessage(sender = "User", message = "Can I make it milder?", createdAt = 1000),
                 SessionChatMessage(sender = "Assistant", message = "Use less chilli.", createdAt = 2000)))
         SessionStore(dir).save(LocalState(history = listOf(original)))
@@ -42,6 +46,12 @@ class TrackMirroringUiTest {
         compose.onAllNodesWithText("Updated dish").assertCountEquals(1)
         compose.onNodeWithText("Original local dish").assertDoesNotExist()
         compose.onAllNodesWithContentDescription("Edit dish name").assertCountEquals(0)
+        compose.onNodeWithTag("history-list").performScrollToNode(hasText("Vitamins & minerals"))
+        compose.onNodeWithText("Vitamins & minerals").performClick()
+        compose.onNodeWithTag("history-list").performScrollToNode(hasText("≈ 0.003 µg"))
+        compose.onNodeWithText("≈ 0.003 µg").assertIsDisplayed()
+        compose.onNodeWithTag("history-list").performScrollToNode(hasText("≈ 1000 mg"))
+        compose.onNodeWithText("≈ 1000 mg").assertIsDisplayed()
         compose.onNodeWithTag("history-list").performScrollToNode(hasTestTag("history-conversation-peer-record"))
         compose.onNodeWithText("Can I make it milder?").assertDoesNotExist()
         compose.onNodeWithTag("history-conversation-peer-record").performClick()

@@ -129,6 +129,7 @@ fun TrackScreen(
             var showIngredients by rememberSaveable(session.id) { mutableStateOf(false) }
             var showConversation by rememberSaveable(session.id) { mutableStateOf(false) }
             var visibleMessages by rememberSaveable(session.id) { mutableIntStateOf(30) }
+            var showMicronutrients by rememberSaveable(session.id) { mutableStateOf(false) }
             val locallyOwned = localRecords[session.id]?.let {
                 it.version == session.version && it.updatedAt == session.updatedAt
             } == true
@@ -215,6 +216,30 @@ fun TrackScreen(
                     if (session.completedAt != null && (recipe.calories != null || listOf(recipe.proteinG,recipe.carbsG,recipe.fatsG).any { it != null && it.isFinite() && it >= 0f })) {
                         HorizontalDivider(color = Color.White.copy(alpha = 0.08f), modifier = Modifier.padding(vertical = 4.dp))
                         HistoryNutrition(recipe)
+                    }
+                    val micronutrients = recipe.nutrients.filter { nutrient ->
+                        nutrient.amount.isFinite() && nutrient.amount >= 0 &&
+                            (nutrient.name.startsWith("Vitamin ") || nutrient.name in setOf(
+                                "Sodium", "Potassium", "Calcium", "Iron", "Magnesium", "Phosphorus", "Zinc", "Copper",
+                                "Manganese", "Selenium", "Iodine", "Folate", "Folic Acid", "Choline"))
+                    }
+                    if (session.completedAt != null && micronutrients.isNotEmpty()) {
+                        TextButton(onClick = { showMicronutrients = !showMicronutrients }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Vitamins & minerals", modifier = Modifier.weight(1f),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Start)
+                            Icon(if (showMicronutrients) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = if (showMicronutrients) "Hide vitamins and minerals" else "Show vitamins and minerals")
+                        }
+                        if (showMicronutrients) {
+                            Text("${recipe.source} · per serving estimate", color = muted, fontSize = 12.sp)
+                            micronutrients.forEach { nutrient ->
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Text(nutrient.name, color = muted, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                                    Text("≈ ${java.math.BigDecimal.valueOf(nutrient.amount).stripTrailingZeros().toPlainString()} ${nutrient.unit}", color = Color.White, fontSize = 13.sp)
+                                }
+                            }
+                            Text("Recipe estimates, not measurements of your finished dish.", color = muted, fontSize = 11.sp)
+                        }
                     }
                 }
                 if (session.conversation.isNotEmpty()) {

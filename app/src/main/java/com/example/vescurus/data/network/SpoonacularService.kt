@@ -25,16 +25,41 @@ class RecipeServiceException(val reason: String) : Exception(reason)
 @Serializable data class SpoonacularSearch(val results: List<SpoonacularRecipeDetail> = emptyList())
 
 object RecipeMapper {
+    private val nutrientNames = listOf("Calories", "Protein", "Carbohydrates", "Fat", "Saturated Fat", "Fiber", "Sugar",
+        "Cholesterol", "Sodium", "Potassium", "Calcium", "Iron", "Magnesium", "Phosphorus", "Zinc", "Copper", "Manganese",
+        "Selenium", "Iodine", "Vitamin A", "Vitamin C", "Vitamin D", "Vitamin E", "Vitamin K", "Vitamin B1", "Vitamin B2",
+        "Vitamin B3", "Vitamin B5", "Vitamin B6", "Vitamin B12", "Folate", "Folic Acid", "Choline")
+        .associateBy { it.lowercase(java.util.Locale.ROOT) }
+    private fun sourceNutrients(items: List<SpoonacularNutrient>): List<RecipeNutrient> = items.mapNotNull { item ->
+        if (item.name.length > 60 || item.unit.length > 12) return@mapNotNull null
+        val name = nutrientNames[item.name.trim().replace(Regex("\\s+"), " ").lowercase(java.util.Locale.ROOT)]
+            ?: return@mapNotNull null
+        val unit = when (item.unit.trim().lowercase(java.util.Locale.ROOT)) {
+            "g" -> "g"; "mg" -> "mg"; "µg", "μg", "mcg", "ug" -> "µg"; "iu" -> "IU"; "kcal" -> "kcal"
+            else -> return@mapNotNull null
+        }
+        val allowed = when (name) {
+            "Calories" -> setOf("kcal")
+            "Protein", "Carbohydrates", "Fat", "Saturated Fat", "Fiber", "Sugar" -> setOf("g")
+            "Vitamin A", "Vitamin D" -> setOf("IU", "µg")
+            "Vitamin B12", "Vitamin K", "Folate", "Folic Acid", "Selenium", "Iodine" -> setOf("µg")
+            else -> setOf("mg")
+        }
+        val amount = item.amount?.takeIf { it.isFinite() && it >= 0 } ?: return@mapNotNull null
+        if (unit !in allowed) return@mapNotNull null
+        RecipeNutrient(name, amount, unit)
+    }.groupBy { it.name }.values.mapNotNull { versions -> versions.distinct().singleOrNull() }
+
     fun map(d: SpoonacularRecipeDetail, now: Long): Recipe? {
         val instructions=d.analyzedInstructions.flatMap { it.steps }.filter { it.step.isNotBlank() }
         if(instructions.isEmpty()) return null
-        val nutrients=d.nutrition?.nutrients.orEmpty()
-        fun nutrient(name: String,unit: String): Double? = nutrients.firstOrNull { it.name.equals(name,true) && it.unit.equals(unit,true) }?.amount?.takeIf { it.isFinite() && it>=0 }
+        val nutrients=sourceNutrients(d.nutrition?.nutrients.orEmpty())
+        fun nutrient(name: String,unit: String): Double? = nutrients.firstOrNull { it.name == name && it.unit == unit }?.amount
         val total=d.readyInMinutes.coerceAtLeast(1)*60_000L
         return Recipe(id="spoon-${d.id}",name=d.title,description=d.summary?.replace(Regex("<[^>]*>"),"")?.take(180).orEmpty(),
             thumbnailUrl=d.image,totalTimeMs=total,steps=instructions.mapIndexed { i,s -> RecipeStep(i*total/instructions.size,(i+1)*total/instructions.size,s.step) },
-            calories=nutrient("Calories","kcal")?.toInt(),proteinG=nutrient("Protein","g")?.toFloat(),carbsG=nutrient("Carbohydrates","g")?.toFloat(),fatsG=nutrient("Fat","g")?.toFloat(),
-            source="Spoonacular",sourceUrl=d.sourceUrl,servings=d.servings,targets=d.extendedIngredients.map { RecipeTarget(it.name,it.amount,it.unit,it.original) },savedAt=now)
+            calories=nutrient("Calories","kcal")?.takeIf { it <= Int.MAX_VALUE }?.toInt(),proteinG=nutrient("Protein","g")?.toFloat()?.takeIf { it.isFinite() },carbsG=nutrient("Carbohydrates","g")?.toFloat()?.takeIf { it.isFinite() },fatsG=nutrient("Fat","g")?.toFloat()?.takeIf { it.isFinite() },
+            source="Spoonacular",sourceUrl=d.sourceUrl,servings=d.servings,targets=d.extendedIngredients.map { RecipeTarget(it.name,it.amount,it.unit,it.original) },savedAt=now,nutrients=nutrients)
     }
     fun panCompatible(r: Recipe): Boolean {
         val text=r.steps.joinToString(" ") { it.instruction.lowercase() }

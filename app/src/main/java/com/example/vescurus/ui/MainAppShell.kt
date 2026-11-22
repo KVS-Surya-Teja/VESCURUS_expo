@@ -307,7 +307,8 @@ fun RoleSpecificCookScreen(
                 latestFrame = null,
                 viewModel = viewModel,
                 onSnapshot = {},
-                onDirectConnect = { _, _ -> }
+                onDirectConnect = { _, _ -> },
+                onOpenTrack = onOpenTrack
             )
         }
         else -> {

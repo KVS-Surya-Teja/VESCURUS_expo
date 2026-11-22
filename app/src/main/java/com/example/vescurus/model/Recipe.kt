@@ -14,6 +14,9 @@ data class RecipeStep(
 )
 
 @Serializable
+data class RecipeNutrient(val name: String, val amount: Double, val unit: String)
+
+@Serializable
 data class Recipe(
     val id: String,
     val categoryClass: Int = 0,
@@ -31,7 +34,8 @@ data class Recipe(
     val sourceUrl: String? = null,
     val servings: Int? = null,
     val targets: List<RecipeTarget> = emptyList(),
-    val savedAt: Long? = null
+    val savedAt: Long? = null,
+    val nutrients: List<RecipeNutrient> = emptyList()
 )
 
 val EGG_RECIPES = listOf(
@@ -59,10 +63,10 @@ val EGG_RECIPES = listOf(
         thumbnail = R.drawable.scrambled_eggs,
         totalTimeMs = 90000L, // 1.5 mins
         steps = listOf(
-            RecipeStep(0, 30000, "Crack the eggs, and set it at dark setting for the heat", "Crack the eggs, and set it at dark setting for the heat."),
-            RecipeStep(30000, 40000, "Add salt & pepper", "Now add salt and pepper."),
-            RecipeStep(40000, 60000, "Scramble them", "Start scrambling them now."),
-            RecipeStep(60000, 90000, "Add onion & green chilli; stir until 1 min 30 sec and serve.", "Add onion and green chilli. Stir until one minute thirty seconds, then serve.")
+            RecipeStep(0, 30000, "Warm a lightly oiled pan over medium-low heat. Add chopped onion and green chilli; stir until softened. Whisk the eggs in a bowl.", "Warm a lightly oiled pan over medium low heat. Soften the chopped onion and green chilli, then whisk the eggs."),
+            RecipeStep(30000, 40000, "Pour in the whisked eggs and add salt and pepper.", "Pour in the whisked eggs and add salt and pepper."),
+            RecipeStep(40000, 60000, "Gently stir and fold the eggs as soft curds form. Lower the heat if they brown quickly.", "Gently stir and fold the eggs. Lower the heat if they brown quickly."),
+            RecipeStep(60000, 90000, "Continue cooking until the eggs are set with no runny liquid remaining, then serve. Allow more time if needed; the timer is only a reminder.", "Continue until the eggs are set with no runny liquid, then serve. Take more time if needed.")
         ),
         calories = 220, proteinG = 13f, carbsG = 4f, fatsG = 16f
     ),

@@ -89,4 +89,3 @@ class ConversationHistoryTest {
         } finally { release.complete(Unit);main { owner.clear() } }
     }
 }
-
