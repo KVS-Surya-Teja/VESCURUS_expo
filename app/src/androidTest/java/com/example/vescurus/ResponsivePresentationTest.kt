@@ -113,9 +113,16 @@ class ResponsivePresentationTest {
             compose.runOnIdle { size = viewport }
             compose.onNodeWithTag("nav-track").performClick()
             compose.onNodeWithText("Your cooking journal").assertIsDisplayed()
+            Espresso.pressBack()
+            compose.onNodeWithTag("chat-input").assertIsDisplayed()
             compose.onNodeWithTag("nav-settings").performClick()
             compose.onNodeWithTag("switch-role").performScrollTo().assertIsDisplayed()
-            compose.onNodeWithTag("nav-cook").performClick()
+            Espresso.pressBack()
+            compose.onNodeWithTag("chat-input").assertIsDisplayed()
+            compose.onNodeWithTag("cook-tab-ingredients").performClick()
+            compose.onNodeWithTag("cook-scroll").performScrollToNode(hasTestTag("add-ingredient"))
+            compose.onNodeWithTag("add-ingredient").assertIsDisplayed()
+            Espresso.pressBack()
             compose.onNodeWithTag("chat-input").assertIsDisplayed()
         }
     }

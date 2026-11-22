@@ -143,7 +143,7 @@ internal fun GuidePairingDialog(diagnostics: String, pairingCode: String?, onDis
                 } else {
                     Text("Still finding this phone's address. Check Wi-Fi and reopen these details.", fontSize = 12.sp)
                 }
-                Text("Keep both phones on the same Wi-Fi or hotspot.", fontSize = 12.sp)
+                Text("Keep both phones on the same Wi-Fi or hotspot. Pairing also keeps your cooking journal on both phones.", fontSize = 12.sp)
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } }

@@ -20,7 +20,8 @@ import java.io.File
 import java.util.Locale
 import java.util.UUID
 
-data class ChatMessage(val sender: String, val message: String)
+data class ChatMessage(val sender: String, val message: String,
+    val id: String = UUID.randomUUID().toString(), val createdAt: Long = System.currentTimeMillis())
 enum class CookingState { IDLE, RECIPE_SELECTION, COUNTDOWN, COOKING, DONE }
 
 private fun assistantFailure(error: Exception, fallback: String): String = when((error as? com.example.vescurus.data.network.GeminiTextException)?.code) {
@@ -74,6 +75,9 @@ class CookViewModel @JvmOverloads constructor(
     directory: File = File(application.filesDir,"sessions"),
     private val recipePlanner: suspend (CookingSession, List<ChatMessage>) -> Recipe = { state, conversation ->
         com.example.vescurus.data.repository.CookingRecipePlanner().plan(state, conversation)
+    },
+    private val assistantResponder: suspend (String) -> String = {
+        com.example.vescurus.data.network.GeminiTextService().generate(it)
     }
 ) : AndroidViewModel(application), TextToSpeech.OnInitListener {
     private val store=SessionStore(directory)
@@ -83,6 +87,7 @@ class CookViewModel @JvmOverloads constructor(
     private var saveGeneration=0L
     var session by mutableStateOf(CookingSession()); private set
     var sessions by mutableStateOf<List<CookingSession>>(emptyList()); private set
+    var failedChatQuestion by mutableStateOf<String?>(null); private set
     var isLoading by mutableStateOf(true); private set
     var isSaving by mutableStateOf(false); private set
     var storageMessage by mutableStateOf<String?>(null); private set
@@ -129,7 +134,7 @@ class CookViewModel @JvmOverloads constructor(
             else -> foods.joinToString("; ") { "Identified ${it.label} with ${(it.confidence*100).toInt()}% confidence" }+
                 ". Confirm the name, then weigh it."
         }
-        recognitionMessage=text;messages.add(ChatMessage("Assistant",text));speak(text)
+        recognitionMessage=text;appendMessage(ChatMessage("Assistant",text));speak(text)
     }
     fun renameCompletedSession(id: String,title: String) {
         val name=title.trim().take(120);if(name.isEmpty())return
@@ -196,10 +201,23 @@ class CookViewModel @JvmOverloads constructor(
             val loaded=withContext(Dispatchers.IO) { store.load(demo) }
             val savedRecipes=withContext(Dispatchers.IO) { store.loadRecipes().filter { it.id.startsWith("ai-") || com.example.vescurus.data.network.RecipeMapper.panCompatible(it) } }
             session=loaded.active.copy(paused=loaded.active.state=="COOKING" || loaded.active.paused)
-            sessions=loaded.history;onlineRecipes=savedRecipes
+            sessions=loaded.history;restoreConversation();onlineRecipes=savedRecipes
             _availableRecipes.value=savedRecipes
             storageMessage=store.recoveryMessage;syncHistory();isLoading=false;persist()
         }
+    }
+    private fun restoreConversation() {
+        messages.clear()
+        messages.addAll(session.conversation.map { ChatMessage(it.sender, it.message, it.id, it.createdAt) })
+    }
+    private fun appendMessage(message: ChatMessage) {
+        if(isLoading || session.conversation.any { it.id == message.id }) return
+        messages.add(message)
+        session=session.copy(conversation=session.conversation + SessionChatMessage(
+            message.id, message.sender, message.message, message.createdAt),
+            version=session.version+1, updatedAt=System.currentTimeMillis())
+        sessions=sessions.map { if(it.id == session.id) session else it }
+        persist()
     }
     private fun syncHistory() { _history.value=sessions.filter { it.completedAt!=null }.mapNotNull { s -> s.recipe?.let { r ->
         CookHistoryItem(s.id,r.id,r.name,s.completedAt!!,r.calories,r.proteinG,r.carbsG,r.fatsG) } } }
@@ -244,13 +262,13 @@ class CookViewModel @JvmOverloads constructor(
         val snapshot=session;val conversation=messages.toList();val owner=session.id;val token=++fetchGeneration
         fetchJob=viewModelScope.launch {
             isFetchingRecipes=true;recipeMessage="Planning with your ingredients and preferences…"
-            messages.add(ChatMessage("Assistant",recipeMessage))
+            appendMessage(ChatMessage("Assistant",recipeMessage))
             try {
                 val planned=recipePlanner(snapshot,conversation)
                 if(!ownsRecipeRequest(owner,token))return@launch
                 if(session.entries!=snapshot.entries || session.planningNotes!=snapshot.planningNotes) {
                     recipeMessage="Your ingredients or preferences changed. Find recipes again for an updated plan."
-                    messages.add(ChatMessage("Assistant",recipeMessage));return@launch
+                    appendMessage(ChatMessage("Assistant",recipeMessage));return@launch
                 }
                 update(session.copy(recipe=planned,state="RECIPE_SELECTION",step=0,stepElapsedMs=0,paused=false,stepTimerSeconds=null))
                 onlineRecipes=(listOf(planned)+onlineRecipes).distinctBy { it.id };_availableRecipes.value=onlineRecipes
@@ -259,12 +277,12 @@ class CookViewModel @JvmOverloads constructor(
                 if(!ownsRecipeRequest(owner,token))return@launch
                 recipeMessage="Your recipe is ready. Review it, or tell me what to change."
                 val reply="${planned.name}. ${planned.description} Tell me any changes before starting."
-                messages.add(ChatMessage("Assistant",reply));speak(reply)
+                appendMessage(ChatMessage("Assistant",reply));speak(reply)
             } catch(e: CancellationException) { throw e }
             catch(e: Exception) {
                 if(ownsRecipeRequest(owner,token)) {
                     recipeMessage=if(e is com.example.vescurus.data.repository.RecipePlanningQuestion) e.question else assistantFailure(e,"I couldn't plan a recipe just now. Try again, or browse saved recipes.")
-                    messages.add(ChatMessage("Assistant",recipeMessage))
+                    appendMessage(ChatMessage("Assistant",recipeMessage))
                 }
             } finally { if(fetchGeneration==token)isFetchingRecipes=false }
         }
@@ -345,13 +363,13 @@ class CookViewModel @JvmOverloads constructor(
         sessions=(sessions.filterNot { it.id==session.id }+session);syncHistory();persist();timerJob?.cancel()
     }
     fun startNewSession() {
-        if(session.completedAt==null && (session.entries.isNotEmpty() || session.recipe!=null))return
+        if(session.completedAt==null && (session.entries.isNotEmpty() || session.recipe!=null || session.conversation.isNotEmpty()))return
         timerJob?.cancel();resetChat();session=CookingSession(demonstration=isDemo);persist()
     }
     fun archiveDraftAndStartNew() {
         if(isLoading)return
         timerJob?.cancel()
-        if(session.completedAt==null && (session.entries.isNotEmpty() || session.recipe!=null)) {
+        if(session.completedAt==null && (session.entries.isNotEmpty() || session.recipe!=null || session.conversation.isNotEmpty())) {
             val draft=session.copy(paused=true,updatedAt=System.currentTimeMillis(),version=session.version+1)
             sessions=sessions.filterNot { it.id==draft.id }+draft
         }
@@ -362,36 +380,48 @@ class CookViewModel @JvmOverloads constructor(
         timerJob?.cancel();resetChat()
         val current=session
         sessions=sessions.filterNot { it.id==id }
-        if(current.completedAt==null && (current.entries.isNotEmpty() || current.recipe!=null)) sessions=sessions.filterNot { it.id==current.id }+current.copy(paused=true)
-        session=draft.copy(paused=true,version=draft.version+1,updatedAt=System.currentTimeMillis());syncHistory();persist()
+        if(current.completedAt==null && (current.entries.isNotEmpty() || current.recipe!=null || current.conversation.isNotEmpty())) sessions=sessions.filterNot { it.id==current.id }+current.copy(paused=true)
+        session=draft.copy(paused=true,version=draft.version+1,updatedAt=System.currentTimeMillis());restoreConversation();syncHistory();persist()
     }
     fun exportJson(): String = store.export(LocalState(active=session,history=sessions))
     fun toggleVoice() { isTtsEnabled=!isTtsEnabled;if(!isTtsEnabled)voice?.stop();prefs.edit().putBoolean("voice",isTtsEnabled).apply() }
     private fun resetChat() {
         cancelRecipeWork();recipeMessage="Find recipes for your ingredients, or choose an offline guide."
-        chatGeneration++;chatJob?.cancel();chatJob=null;isGenerating=false;messages.clear();voice?.stop();recognitionJob?.cancel();recognitionInProgress=false;recognitionMessage=null;lastRecognitionKey=null
+        chatGeneration++;chatJob?.cancel();chatJob=null;isGenerating=false;messages.clear();failedChatQuestion=null;voice?.stop();recognitionJob?.cancel();recognitionInProgress=false;recognitionMessage=null;lastRecognitionKey=null
     }
-    fun sendMessage(text: String) {
-        val question=text.trim()
+    fun sendMessage(text: String) = requestAssistantReply(text.trim(), appendUser = true)
+    fun retryAssistantReply() {
+        val question = failedChatQuestion ?: return
+        requestAssistantReply(question, appendUser = false)
+    }
+    private fun requestAssistantReply(question: String, appendUser: Boolean) {
         if(isGenerating || isLoading || question.isEmpty())return
-        if(session.completedAt==null && cookingState!=CookingState.COOKING && cookingState!=CookingState.DONE)
+        failedChatQuestion=null
+        if(appendUser && session.completedAt==null && cookingState!=CookingState.COOKING && cookingState!=CookingState.DONE)
             update(session.copy(planningNotes=(session.planningNotes+question.take(1500)).takeLast(20)))
-        messages.add(ChatMessage("User",question));isGenerating=true
+        if(appendUser) appendMessage(ChatMessage("User",question))
+        isGenerating=true
         val requestGeneration=chatGeneration
         val requestSessionId=session.id
-        val prompt=cookingAssistantPrompt(session,messages.toList())
+        val prompt=cookingAssistantPrompt(session,messages.toList()) +
+            if(appendUser) "" else "\nRetry this unanswered user question in the current session context: ${question.take(4000)}"
         chatJob=viewModelScope.launch {
             try {
-                val response=com.example.vescurus.data.network.GeminiTextService().generate(prompt)
+                val response=assistantResponder(prompt)
                 if(requestGeneration==chatGeneration && requestSessionId==session.id) {
                     val reply=response.takeIf { it.isNotBlank() }
-                    if(reply==null) messages.add(ChatMessage("System","No reply came back. Please try again."))
-                    else { messages.add(ChatMessage("AI suggestion",reply));speak(reply) }
+                    if(reply==null) {
+                        failedChatQuestion=question
+                        appendMessage(ChatMessage("System","No reply came back. Please try again."))
+                    }
+                    else { appendMessage(ChatMessage("AI suggestion",reply));speak(reply) }
                 }
             } catch(e: CancellationException) { throw e
             } catch(e: Exception) {
-                if(requestGeneration==chatGeneration && requestSessionId==session.id)
-                    messages.add(ChatMessage("System",assistantFailure(e,"The assistant couldn't reply. Try again in a moment.")))
+                if(requestGeneration==chatGeneration && requestSessionId==session.id) {
+                    failedChatQuestion=question
+                    appendMessage(ChatMessage("System",assistantFailure(e,"The assistant couldn't reply. Try again in a moment.")))
+                }
             } finally { if(requestGeneration==chatGeneration)isGenerating=false }
         }
     }

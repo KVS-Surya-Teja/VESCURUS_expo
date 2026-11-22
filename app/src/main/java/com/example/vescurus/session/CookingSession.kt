@@ -25,6 +25,13 @@ import java.util.UUID
 ) {
     val label: String get() = identities.joinToString(" + ")
 }
+/** A real session exchange, preserved verbatim with stable identity and local wall-clock time. */
+@Serializable data class SessionChatMessage(
+    val id: String = UUID.randomUUID().toString(),
+    val sender: String,
+    val message: String,
+    val createdAt: Long = System.currentTimeMillis()
+)
 @Serializable data class CookingSession(
     val schemaVersion: Int = 1, val id: String = UUID.randomUUID().toString(),
     val version: Long = 0, val createdAt: Long = System.currentTimeMillis(),
@@ -35,7 +42,8 @@ import java.util.UUID
     val planningNotes: List<String> = emptyList(),
     val historyTitle: String? = null, val cookingStartedAt: Long? = null,
     val activeCookingMs: Long = 0, val finalPhotoPath: String? = null,
-    val finalPhotoCapturedAt: Long? = null
+    val finalPhotoCapturedAt: Long? = null,
+    val conversation: List<SessionChatMessage> = emptyList()
 ) {
     val ingredientNames: List<String> get() = entries.filter { it.status != EntryStatus.UNDONE }.flatMap { it.identities }.distinct()
 }

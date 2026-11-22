@@ -1,5 +1,6 @@
 package com.example.vescurus.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -82,6 +83,15 @@ fun MainAppShell(
     val analysisRequest by connectionManager.analysisRequest.collectAsStateWithLifecycle()
     val finishedPhoto by connectionManager.finishedPhoto.collectAsStateWithLifecycle()
     val analysisRequestId by connectionManager.analysisRequestId.collectAsStateWithLifecycle()
+    val mirroredHistory by connectionManager.mirroredHistory.collectAsStateWithLifecycle()
+    val historySyncError by connectionManager.historySyncError.collectAsStateWithLifecycle()
+    val historySyncPending by connectionManager.historySyncPending.collectAsStateWithLifecycle()
+    val historyLoaded by connectionManager.historyLoaded.collectAsStateWithLifecycle()
+    val localHistoryRecords = localJournalRecords(cookViewModel)
+    LaunchedEffect(selectedRole, historyLoaded, cookViewModel.isLoading, localHistoryRecords) {
+        if (historyLoaded && !cookViewModel.isLoading && selectedRole != Role.DEMONSTRATE)
+            connectionManager.updateLocalHistory(localHistoryRecords)
+    }
     LaunchedEffect(selectedRole,connectionStatus,cookViewModel.session.completedAt,cookViewModel.session.finalPhotoPath) {
         if(selectedRole==Role.COOK && cookViewModel.session.completedAt!=null && cookViewModel.session.finalPhotoPath==null && connectionStatus==ConnectionStatus.CONNECTED)
             connectionManager.requestFinishedPhoto(cookViewModel.sessionId)
@@ -114,8 +124,9 @@ fun MainAppShell(
     DisposableEffect(selectedRole) { onDispose { connectionManager.stop() } }
 
     var selectedItem by rememberSaveable(selectedRole) { mutableStateOf(0) }
+    BackHandler(enabled = selectedItem != 0) { selectedItem = 0 }
     val previousItem = remember { mutableStateOf(0) }
-    val items = if (selectedRole == Role.GUIDE) listOf(NavItem.Cook, NavItem.Settings) else listOf(NavItem.Cook, NavItem.Track, NavItem.Settings)
+    val items = listOf(NavItem.Cook, NavItem.Track, NavItem.Settings)
 
     Scaffold(
         modifier = Modifier.semantics { testTagsAsResourceId = true },
@@ -200,6 +211,8 @@ fun MainAppShell(
                             onBroadcastDetection = { connectionManager.broadcastDetection(it) },
                             onBroadcastFrame = { connectionManager.broadcastFrame(it) },
                             onSnapshot = { if(cookViewModel.beginIngredientRecognition()) connectionManager.sendSnapshotCommand() },
+                            onOpenTrack = { previousItem.value = selectedItem; selectedItem = items.indexOf(NavItem.Track).coerceAtLeast(0) },
+                            onCaptureDishPhoto = { connectionManager.requestFinishedPhoto(cookViewModel.sessionId) },
                             remoteAnalysisRequest = analysisRequest,
                             remoteAnalysisRequestId = analysisRequestId,
                             onDirectConnect = { ip, port -> connectionManager.connectDirectly(ip, port) },
@@ -214,6 +227,15 @@ fun MainAppShell(
                     NavItem.Track -> TrackScreen(
                         viewModel = cookViewModel,
                         allowResume = selectedRole != Role.GUIDE,
+                        allowRename = selectedRole != Role.GUIDE,
+                        mirroredSessions = if (selectedRole == Role.DEMONSTRATE) emptyList() else mirroredHistory,
+                        mirrorNotice = if (selectedRole == Role.DEMONSTRATE) null else when {
+                            historySyncError != null -> "Some records could not be copied to the other phone. Keep both phones connected and try again."
+                            historySyncPending > 0 && connectionStatus == ConnectionStatus.CONNECTED -> "Saving a copy on your other phone…"
+                            historySyncPending > 0 -> "Saved here. Connect both phones to keep a copy on each."
+                            else -> null
+                        },
+                        onRetryMirror = { connectionManager.updateLocalHistory(localHistoryRecords) },
                         onResumeDraft = {
                             previousItem.value = selectedItem
                             selectedItem = 0
@@ -245,7 +267,9 @@ fun RoleSpecificCookScreen(
     sessionId: String = "unpaired",
     onObservation: (com.example.vescurus.model.Observation) -> Unit = {},
     onVideoAvailable: (com.example.vescurus.model.VideoFrame) -> Unit = {},
-    latestFrameFlow: kotlinx.coroutines.flow.StateFlow<ByteArray?>? = null
+    latestFrameFlow: kotlinx.coroutines.flow.StateFlow<ByteArray?>? = null,
+    onOpenTrack: () -> Unit = {},
+    onCaptureDishPhoto: () -> Unit = {}
 ) {
     when (selectedRole) {
         Role.GUIDE -> {
@@ -270,7 +294,9 @@ fun RoleSpecificCookScreen(
                 viewModel = viewModel,
                 onSnapshot = onSnapshot,
                 onDirectConnect = onDirectConnect,
-                observation = observation
+                observation = observation,
+                onOpenTrack = onOpenTrack,
+                onCaptureDishPhoto = onCaptureDishPhoto
             )
         }
         Role.DEMONSTRATE -> {

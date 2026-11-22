@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.ActivityNotFoundException
 import android.speech.RecognizerIntent
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
@@ -122,7 +123,9 @@ fun CookScreen(
     onSnapshot: () -> Unit,
     onDirectConnect: (String, Int) -> Unit = { _, _ -> },
     observation: Observation? = null,
-    latestFrameFlow: StateFlow<ByteArray?>? = null
+    latestFrameFlow: StateFlow<ByteArray?>? = null,
+    onOpenTrack: () -> Unit = {},
+    onCaptureDishPhoto: () -> Unit = {}
 ) {
     var editor by remember { mutableStateOf<EntryEditor?>(null) }
     var connect by rememberSaveable { mutableStateOf(false) }
@@ -130,6 +133,7 @@ fun CookScreen(
     var visionHudEnabled by rememberSaveable { mutableStateOf(true) }
     var analyzed by rememberSaveable { mutableStateOf(false) }
     var workspace by rememberSaveable { mutableIntStateOf(0) }
+    BackHandler(enabled = workspace != 0) { workspace = 0 }
     var showGuides by rememberSaveable { mutableStateOf(false) }
     var timerDialog by rememberSaveable { mutableStateOf(false) }
     var chat by rememberSaveable { mutableStateOf("") }
@@ -386,7 +390,10 @@ fun CookScreen(
                                     viewModel = viewModel,
                                     onTimer = { timerDialog = true },
                                     onIngredients = { workspace = 1 },
-                                    onRecipeDetails = { workspace = 2 }
+                                    onRecipeDetails = { workspace = 2 },
+                                    onOpenTrack = onOpenTrack,
+                                    onCaptureDishPhoto = onCaptureDishPhoto,
+                                    cameraConnected = status == ConnectionStatus.CONNECTED
                                 )
                             }
                         }
@@ -399,6 +406,12 @@ fun CookScreen(
                         }
                         items(viewModel.messages.size, key = { "message-$it" }) { index ->
                             CookChatBubble(viewModel.messages[index])
+                        }
+                        if (viewModel.failedChatQuestion != null && !viewModel.isGenerating) {
+                            item("retry-assistant") {
+                                OutlinedButton(onClick = viewModel::retryAssistantReply,
+                                    modifier = Modifier.testTag("retry-assistant")) { Text("Try reply again") }
+                            }
                         }
                         if (viewModel.isGenerating || viewModel.isFetchingRecipes) {
                             item("thinking") {
@@ -962,7 +975,10 @@ private fun CurrentRecipeCard(
     viewModel: CookViewModel,
     onTimer: () -> Unit,
     onIngredients: () -> Unit,
-    onRecipeDetails: () -> Unit
+    onRecipeDetails: () -> Unit,
+    onOpenTrack: () -> Unit = {},
+    onCaptureDishPhoto: () -> Unit = {},
+    cameraConnected: Boolean = false
 ) {
     val session = viewModel.session
     val recipe = session.recipe ?: return
@@ -1031,18 +1047,32 @@ private fun CurrentRecipeCard(
         }
 
         CookingState.DONE -> SessionCard(
-            if (session.completedAt == null) "Finished cooking?" else "Cooking record saved",
+            when {
+                session.completedAt == null -> "Finished cooking?"
+                viewModel.storageMessage != null -> "Your record needs saving"
+                viewModel.isSaving -> "Saving your cooking record…"
+                else -> "Cooking record saved"
+            },
             if (session.completedAt == null) "Point the camera phone at your finished dish, then save."
             else "Your dish and ingredient record are saved in Track."
         ) {
             if (session.completedAt != null) {
                 Icon(Icons.Default.CheckCircle, null, tint = SavedGreen, modifier = Modifier.size(34.dp))
+                if (session.finalPhotoPath == null) {
+                    Text(if (cameraConnected) "No dish photo saved yet. Point the camera phone at your finished dish."
+                        else "Your record is here. Reconnect the camera phone to save a dish photo.", color = Muted, fontSize = 12.sp)
+                    if (cameraConnected) TextButton(onClick = onCaptureDishPhoto,
+                        modifier = Modifier.testTag("capture-dish-photo")) { Text("Save dish photo") }
+                }
                 Button(
-                    onClick = viewModel::startNewSession,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("new-session"),
+                    onClick = onOpenTrack,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("view-in-track"),
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = Color.Black)
-                ) { Text("Cook something new", fontWeight = FontWeight.SemiBold) }
+                ) { Text("View in Track", fontWeight = FontWeight.SemiBold) }
+                TextButton(onClick = viewModel::startNewSession, modifier = Modifier.testTag("new-session")) {
+                    Text("Cook something new")
+                }
             } else {
                 TextButton(onClick = onIngredients) { Text("Review ingredients") }
                 Button(
@@ -1284,7 +1314,7 @@ fun GuideConnectionDialog(onDismiss: () -> Unit, onConnect: (String, Int) -> Uni
         title = { Text("Connect camera phone") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Enter the address and code shown on your camera phone. Keep both phones on the same Wi-Fi.")
+                Text("Enter the address and code shown on your camera phone. Keep both phones on the same Wi-Fi. Pairing also keeps your cooking journal on both phones.")
                 OutlinedTextField(
                     host, { host = it },
                     isError = host.isNotBlank() && !com.example.vescurus.network.isValidPeerHost(host),

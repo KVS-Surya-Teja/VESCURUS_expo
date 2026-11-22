@@ -35,6 +35,10 @@ import kotlinx.coroutines.sync.withLock
 import io.ktor.server.response.*
 import java.net.ServerSocket
 import java.util.concurrent.atomic.AtomicBoolean
+import com.example.vescurus.history.*
+import com.example.vescurus.session.CookingSession
+import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
 enum class ConnectionStatus {
     IDLE,
@@ -99,12 +103,30 @@ class VescurusConnectionManager : ViewModel() {
     private var reconnectionJob: Job?=null
     private var activeContextChannel: Channel<SessionContext>?=null
     private val serverOwnership=Mutex()
+    private val _mirroredHistory=MutableStateFlow<List<CookingSession>>(emptyList())
+    val mirroredHistory: StateFlow<List<CookingSession>> = _mirroredHistory
+    private val _historySyncError=MutableStateFlow<String?>(null)
+    val historySyncError: StateFlow<String?> = _historySyncError
+    private val _historySyncPending=MutableStateFlow(0)
+    val historySyncPending: StateFlow<Int> = _historySyncPending
+    private val _historyLoaded=MutableStateFlow(false)
+    val historyLoaded: StateFlow<Boolean> = _historyLoaded
+    private var historyStore: HistoryReplicaStore?=null
+    private var historyContext: Context?=null
+    private val historyReady=CompletableDeferred<Unit>()
+    private val historyMutex=Mutex()
+    @Volatile private var latestLocalHistory=emptyList<CookingSession>()
+    private val historyUpdates=Channel<Unit>(Channel.CONFLATED)
+    private var activeHistoryChannel: Channel<Unit>?=null
+    private val unacknowledgedHistory=ConcurrentHashMap.newKeySet<String>()
+    private val acknowledgedHistory=ConcurrentHashMap.newKeySet<String>()
     private class GuidePeer(val session: DefaultWebSocketServerSession) {
         val observations=Channel<Observation>(Channel.CONFLATED)
         val video=Channel<VideoFrame>(Channel.CONFLATED)
+        val history=Channel<Unit>(Channel.CONFLATED)
         var paired=false
         val analysisRequests=linkedSetOf<String>()
-        fun closeQueues() { observations.close();video.close() }
+        fun closeQueues() { observations.close();video.close();history.close() }
     }
     @Volatile private var peer: GuidePeer?=null
     init { viewModelScope.launch {
@@ -116,10 +138,93 @@ class VescurusConnectionManager : ViewModel() {
             if(now-frameReceived>3000) { _latestFrame.value=null;_cameraFresh.value=false }
         }
     } }
+    init { viewModelScope.launch(Dispatchers.IO) {
+        for(ignored in historyUpdates) {
+            delay(300)
+            historyUpdates.tryReceive()
+            try { historyMutex.withLock {
+                historyStore?.let { store ->
+                    if(store.addLocal(latestLocalHistory)) { publishHistory(store);signalHistory() }
+                }
+            } } catch(e: CancellationException) { throw e }
+            catch(_: Exception) { _historySyncError.value="Couldn't save shared history. Your original records are kept on this phone." }
+        }
+    } }
+    /** Union only. Omitting a record never deletes a local or previously mirrored session. */
+    fun updateLocalHistory(records: List<CookingSession>) {
+        latestLocalHistory=records.filterNot { it.demonstration }.toList()
+        historyUpdates.trySend(Unit)
+        if(historyStore==null)historyContext?.let(::initializeHistory)
+    }
+    fun retryHistorySync() {
+        historyContext?.let(::initializeHistory)
+        historyUpdates.trySend(Unit);signalHistory()
+    }
+    private fun initializeHistory(context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try { historyMutex.withLock {
+                if(historyStore==null)historyStore=HistoryReplicaStore(File(context.applicationContext.filesDir,"history-replica"))
+                historyStore?.let { store -> store.addLocal(latestLocalHistory);publishHistory(store);_historySyncError.value=store.recoveryMessage }
+                _historyLoaded.value=true;historyReady.complete(Unit);signalHistory()
+            } } catch(e: CancellationException) { throw e }
+            catch(_: Exception) { _historySyncError.value="Couldn't open shared history. Existing files have been kept for recovery.";_historyLoaded.value=true;historyReady.complete(Unit) }
+        }
+    }
+    private fun publishHistory(store: HistoryReplicaStore) {
+        _mirroredHistory.value=store.sessions()
+        val current=store.transfers().map { it.first }.toSet()
+        unacknowledgedHistory.retainAll(current)
+        unacknowledgedHistory.addAll(current.filterNot { it in acknowledgedHistory })
+        _historySyncPending.value=unacknowledgedHistory.size
+        store.recoveryMessage?.let { _historySyncError.value=it }
+    }
+    private fun signalHistory() { peer?.takeIf { it.paired }?.history?.trySend(Unit);activeHistoryChannel?.trySend(Unit) }
+    private suspend fun sendHistory(sendText: suspend (String)->Unit) {
+        try {
+            historyReady.await()
+            val transfers=historyMutex.withLock { checkNotNull(historyStore).transfers() }
+            unacknowledgedHistory.retainAll(transfers.map { it.first }.toSet())
+            for((recordDigest,files) in transfers) {
+                if(recordDigest in acknowledgedHistory)continue
+                unacknowledgedHistory.add(recordDigest);_historySyncPending.value=unacknowledgedHistory.size
+                for(file in files)for(chunk in historyStore!!.chunks(file)) {
+                    currentCoroutineContext().ensureActive()
+                    sendText("HISTORY_CHUNK|"+json.encodeToString(chunk));yield()
+                }
+            }
+        } catch(e: CancellationException) { throw e }
+        catch(_: Exception) { _historySyncError.value="History sharing is incomplete. Reconnect the phones to retry." }
+    }
+    private suspend fun receiveHistory(text: String,sendText: suspend (String)->Unit) {
+        try {
+            if(text.startsWith("HISTORY_ACK|")) {
+                val digest=text.substringAfter('|')
+                if(digest.matches(Regex("[0-9a-f]{64}")) && unacknowledgedHistory.remove(digest))acknowledgedHistory.add(digest)
+                _historySyncPending.value=unacknowledgedHistory.size
+                if(unacknowledgedHistory.isEmpty())_historySyncError.value=historyStore?.recoveryMessage
+            } else if(text.startsWith("HISTORY_CHUNK|")) {
+                historyReady.await()
+                require(text.length<100_000)
+                val chunk=json.decodeFromString<HistoryChunk>(text.substringAfter('|'))
+                val acknowledgements=withContext(Dispatchers.IO) { historyMutex.withLock {
+                    val store=checkNotNull(historyStore)
+                    store.accept(chunk).also { digests ->
+                        if(digests.isNotEmpty()) {
+                            acknowledgedHistory.addAll(digests);unacknowledgedHistory.removeAll(digests.toSet())
+                            publishHistory(store)
+                        }
+                    }
+                } }
+                for(digest in acknowledgements)sendText("HISTORY_ACK|$digest")
+            }
+        } catch(e: CancellationException) { throw e }
+        catch(_: Exception) { _historySyncError.value="A shared history record couldn't be saved. Original records are kept; reconnect to retry." }
+    }
     fun start(context: Context,role: Role) {
         if(isRunning.get() && role==currentRole)return
         stop()
         if(role!=Role.GUIDE && role!=Role.COOK)return
+        historyContext=context.applicationContext;initializeHistory(context)
         prefs=context.applicationContext.getSharedPreferences("vescurus",0)
         _pairCode.value=prefs!!.getString("ownPairCode",null) ?: (100000+java.security.SecureRandom().nextInt(900000)).toString().also { prefs!!.edit().putString("ownPairCode",it).apply() }
         isRunning.set(true);currentRole=role
@@ -137,7 +242,7 @@ class VescurusConnectionManager : ViewModel() {
     fun stop() {
         isRunning.set(false);generation.incrementAndGet()
         connectionJob?.cancel();reconnectionJob?.cancel();activeContextChannel?.close();activeContextChannel=null
-        activeClientSession=null;peer?.closeQueues();peer=null
+        activeClientSession=null;activeHistoryChannel?.close();activeHistoryChannel=null;acknowledgedHistory.clear();peer?.closeQueues();peer=null
         client?.close();client=null;server?.stop(100,300);server=null
         unregisterService();stopDiscovery();runCatching { multicastLock?.let { if(it.isHeld)it.release() } };multicastLock=null
         clearObservations();gate=ObservationGate();videoGate=ObservationGate(3000)
@@ -158,7 +263,7 @@ class VescurusConnectionManager : ViewModel() {
                 webSocket("/ws") {
                     val owned=GuidePeer(this)
                     // New unauthenticated connections cannot replace the current Cook.
-                    var sender: Job?=null;var videoSender: Job?=null
+                    var sender: Job?=null;var videoSender: Job?=null;var historySender: Job?=null
                     try {
                         send("READY|2")
                         withTimeout(10000) {
@@ -170,6 +275,7 @@ class VescurusConnectionManager : ViewModel() {
                                 send("PAIR_REJECTED");close(CloseReason(CloseReason.Codes.VIOLATED_POLICY,"Pairing rejected"));return@withTimeout
                             }
                             serverOwnership.withLock {
+                                acknowledgedHistory.clear()
                                 val previous=peer;peer=owned;owned.paired=true
                                 previous?.closeQueues();previous?.session?.close(CloseReason(CloseReason.Codes.NORMAL,"Cook replaced"))
                                 if(_sessionContext.value?.sessionId!=request.context.sessionId)clearObservations()
@@ -179,6 +285,8 @@ class VescurusConnectionManager : ViewModel() {
                             _diagnostics.value="Cook synchronized | ${request.context.sessionId.take(8)} v${request.context.version} | $ip:$port"
                         }
                         if(!owned.paired)return@webSocket
+                        owned.history.trySend(Unit)
+                        historySender=launch(Dispatchers.IO) { for(ignored in owned.history)sendHistory { send(it) } }
                         sender=launch { for(o in owned.observations) {
                             val age=SystemClock.elapsedRealtime()-o.captureUptimeMs
                             if(age in 0 until 15000 && o.sessionId==_sessionContext.value?.sessionId)send("OBS|"+json.encodeToString(o.copy(sourceAgeMs=age)))
@@ -189,7 +297,8 @@ class VescurusConnectionManager : ViewModel() {
                         } }
                         for(frame in incoming) if(frame is Frame.Text && peer===owned) {
                             val text=frame.readText()
-                            if(text.startsWith("SESSION|")) {
+                            if(text.startsWith("HISTORY_"))receiveHistory(text) { send(it) }
+                            else if(text.startsWith("SESSION|")) {
                                 val c=json.decodeFromString<SessionContext>(text.removePrefix("SESSION|"))
                                 if(!validContext(c))continue
                                 val previous=_sessionContext.value
@@ -214,7 +323,7 @@ class VescurusConnectionManager : ViewModel() {
                     } catch(e: CancellationException) { throw e
                     } catch(_: Exception) { /* Ownership-scoped cleanup below; never log submitted credentials. */
                     } finally {
-                        sender?.cancel();videoSender?.cancel();owned.closeQueues()
+                        sender?.cancel();videoSender?.cancel();historySender?.cancel();owned.closeQueues()
                         withContext(NonCancellable) { serverOwnership.withLock {
                             if(peer===owned) { peer=null;_sessionContext.value=null;clearObservations();_status.value=ConnectionStatus.DISCONNECTED;_diagnostics.value="Cook disconnected | $ip:$port" }
                         } }
@@ -294,18 +403,21 @@ class VescurusConnectionManager : ViewModel() {
         val code=prefs?.getString("guidePairCode","").orEmpty()
         if(code.length!=6) { _status.value=ConnectionStatus.DISCONNECTED;_diagnostics.value="Enter the six-digit pairing code shown on Guide.";return }
         val attempt=generation.incrementAndGet();stopDiscovery();reconnectionJob?.cancel();connectionJob?.cancel()
+        acknowledgedHistory.clear()
         client?.close()
         val ownedClient=HttpClient(CIO) { install(io.ktor.client.plugins.websocket.WebSockets) { pingInterval=5000;maxFrameSize=3_000_000 };engine { requestTimeout=15000 } }
         client=ownedClient;_status.value=ConnectionStatus.CONNECTING;_diagnostics.value="Connecting and synchronizing session…";clearObservations()
         connectionJob=viewModelScope.launch(Dispatchers.IO) {
             var pairingRejected=false
             val contextQueue=Channel<SessionContext>(Channel.CONFLATED)
+            val historyQueue=Channel<Unit>(Channel.CONFLATED)
             try {
                 ownedClient.webSocket(method=HttpMethod.Get,host=host.trim(),port=port,path="/ws") {
                     if(attempt!=generation.get())return@webSocket
-                    activeClientSession=this;activeContextChannel=contextQueue
+                    activeClientSession=this;activeContextChannel=contextQueue;activeHistoryChannel=historyQueue
                     var paired=false
                     val contextSender=launch { for(c in contextQueue) if(paired)send("SESSION|"+json.encodeToString(c)) }
+                    val historySender=launch { for(ignored in historyQueue)if(paired)sendHistory { send(it) } }
                     val handshakeDeadline=launch { delay(10000);if(!paired)close(CloseReason(CloseReason.Codes.NORMAL,"Synchronization timeout")) }
                     try {
                         for(frame in incoming) if(frame is Frame.Text && attempt==generation.get()) {
@@ -320,10 +432,12 @@ class VescurusConnectionManager : ViewModel() {
                                 }
                                 text.startsWith("SYNC|") -> {
                                     val c=json.decodeFromString<SessionContext>(text.removePrefix("SYNC|"))
-                                    paired=true
+                                    val firstSync=!paired;paired=true
+                                    if(firstSync)historyQueue.trySend(Unit)
                                     if(c==_sessionContext.value) { _status.value=ConnectionStatus.CONNECTED;_diagnostics.value="Session synchronized | ${c.sessionId.take(8)} v${c.version}" }
                                     else _sessionContext.value?.let { contextQueue.trySend(it) }
                                 }
+                                text.startsWith("HISTORY_") && paired -> receiveHistory(text) { send(it) }
                                 text.startsWith("FINISHED_PHOTO|") && paired -> {
                                     val photo=json.decodeFromString<VideoFrame>(text.substringAfter('|'))
                                     if(photo.valid() && photo.sourceAgeMs<3000 && photo.sessionId==requestedPhotoSession && photo.sessionId==_sessionContext.value?.sessionId) {
@@ -344,15 +458,15 @@ class VescurusConnectionManager : ViewModel() {
                                 text.startsWith("SNAPSHOT_UNAVAILABLE|") -> _diagnostics.value="Snapshot unavailable for request ${text.substringAfter('|').take(12)}"
                             }
                         }
-                    } finally { contextSender.cancel();handshakeDeadline.cancel() }
+                    } finally { contextSender.cancel();historySender.cancel();handshakeDeadline.cancel() }
                 }
             } catch(e: CancellationException) { throw e
             } catch(_: Exception) { if(attempt==generation.get())_diagnostics.value="Guide unavailable. Retrying; your cooking session is retained." }
             finally {
-                ownedClient.close();contextQueue.close()
+                ownedClient.close();contextQueue.close();historyQueue.close()
                 withContext(NonCancellable+Dispatchers.Main.immediate) {
                 if(attempt==generation.get() && isRunning.get()) {
-                    activeClientSession=null;activeContextChannel=null;clearObservations()
+                    activeClientSession=null;activeContextChannel=null;activeHistoryChannel=null;clearObservations()
                     if(!pairingRejected) {
                         _status.value=ConnectionStatus.RECONNECTING
                         _diagnostics.value="Guide connection lost. Retrying; your cooking session is retained."

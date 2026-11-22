@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.vescurus.GoldPrimary
 import com.example.vescurus.session.EntryStatus
+import com.example.vescurus.session.CookingSession
 import com.example.vescurus.session.EvidenceSource
 import com.example.vescurus.model.Recipe
 import coil.compose.AsyncImage
@@ -32,12 +33,32 @@ import java.io.File
 import java.text.DateFormat
 import java.util.Date
 
+internal fun localJournalRecords(viewModel: CookViewModel): List<CookingSession> {
+    val current = viewModel.session
+    val meaningful = current.entries.isNotEmpty() || current.recipe != null || current.conversation.isNotEmpty()
+    return ((if (meaningful) listOf(current) else emptyList()) + viewModel.sessions).distinctBy { it.id }
+}
+
 @Composable
-fun TrackScreen(viewModel: CookViewModel, onResumeDraft: () -> Unit = {}, allowResume: Boolean = true) {
+fun TrackScreen(
+    viewModel: CookViewModel,
+    onResumeDraft: () -> Unit = {},
+    allowResume: Boolean = true,
+    allowRename: Boolean = true,
+    mirroredSessions: List<CookingSession> = emptyList(),
+    mirrorNotice: String? = null,
+    onRetryMirror: () -> Unit = {}
+) {
     val muted = Color(0xFF94A3B8)
     var editingId by rememberSaveable { mutableStateOf<String?>(null) }
     var editingTitle by rememberSaveable { mutableStateOf("") }
-    if (editingId != null) {
+    val localRecords = localJournalRecords(viewModel).associateBy { it.id }
+    // Prefer the newest saved version, but never edit a newer peer copy through an older local record.
+    val records = (localRecords.values + mirroredSessions.filter { !it.demonstration })
+        .groupBy { it.id }.values.map { versions ->
+            versions.maxWith(compareBy<CookingSession> { it.version }.thenBy { it.updatedAt })
+        }.sortedByDescending { it.completedAt ?: it.updatedAt }
+    if (editingId != null && allowRename && editingId in localRecords) {
         AlertDialog(
             onDismissRequest = { editingId = null },
             title = { Text("Name your dish") },
@@ -87,17 +108,30 @@ fun TrackScreen(viewModel: CookViewModel, onResumeDraft: () -> Unit = {}, allowR
                 }
             }
         }
-        if (viewModel.sessions.isEmpty()) {
+        mirrorNotice?.let { notice ->
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(notice, color = muted, fontSize = 12.sp)
+                    TextButton(onClick = onRetryMirror) { Text("Try copying again") }
+                }
+            }
+        }
+        if (records.isEmpty()) {
             item {
                 SessionCard(if (viewModel.isLoading) "Loading your journal…" else "Nothing saved yet") {
                     Text("Recipes you finish or save for later will appear here.", color = muted, fontSize = 14.sp)
                 }
             }
         }
-        items(viewModel.sessions.reversed(), key = { it.id }) { session ->
+        items(records, key = { it.id }) { session ->
             val entries = session.entries.filter { it.status != EntryStatus.UNDONE }
             val ingredientCount = entries.flatMap { it.identities }.distinct().size
             var showIngredients by rememberSaveable(session.id) { mutableStateOf(false) }
+            var showConversation by rememberSaveable(session.id) { mutableStateOf(false) }
+            var visibleMessages by rememberSaveable(session.id) { mutableIntStateOf(30) }
+            val locallyOwned = localRecords[session.id]?.let {
+                it.version == session.version && it.updatedAt == session.updatedAt
+            } == true
             val date = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
                 .format(Date(session.completedAt ?: session.updatedAt))
             val activeTime = if(session.completedAt != null && session.cookingStartedAt != null) {
@@ -105,22 +139,22 @@ fun TrackScreen(viewModel: CookViewModel, onResumeDraft: () -> Unit = {}, allowR
                 if(seconds < 60) "${seconds}s active cooking" else "${seconds / 60} min ${seconds % 60}s active cooking"
             } else null
             JournalCard(
-                session.historyTitle?.takeIf { it.isNotBlank() } ?: session.recipe?.name ?: "Ingredients",
+                session.historyTitle?.takeIf { it.isNotBlank() } ?: session.recipe?.name ?: if (session.conversation.isNotEmpty()) "Cooking notes" else "Ingredients",
                 listOfNotNull(date, activeTime).joinToString(" · "),
                 photoPath = session.finalPhotoPath.takeIf { session.completedAt != null },
-                onRename = if(session.completedAt == null) null else ({
+                onRename = if(session.completedAt == null || !allowRename || !locallyOwned) null else ({
                     editingTitle = session.historyTitle ?: session.recipe?.name.orEmpty()
                     editingId = session.id
                 })
             ) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    HistoryBadge(if (session.completedAt == null) "Saved for later" else "Finished", if (session.completedAt == null) GoldPrimary else Color(0xFF86EFAC))
+                    HistoryBadge(if (session.completedAt != null) "Finished" else if (session.state == "COOKING") "In progress" else "Saved for later", if (session.completedAt == null) GoldPrimary else Color(0xFF86EFAC))
                     if (session.demonstration) HistoryBadge("Practice", Color(0xFFC4B5FD))
                 }
-                if (session.completedAt == null && allowResume) {
+                if (session.completedAt == null && allowResume && locallyOwned) {
                     OutlinedButton(
                         onClick = {
-                            viewModel.resumeDraft(session.id)
+                            if (viewModel.sessionId != session.id) viewModel.resumeDraft(session.id)
                             if (viewModel.sessionId == session.id) onResumeDraft()
                         },
                         enabled = !viewModel.isLoading,
@@ -181,6 +215,30 @@ fun TrackScreen(viewModel: CookViewModel, onResumeDraft: () -> Unit = {}, allowR
                     if (session.completedAt != null && (recipe.calories != null || listOf(recipe.proteinG,recipe.carbsG,recipe.fatsG).any { it != null && it.isFinite() && it >= 0f })) {
                         HorizontalDivider(color = Color.White.copy(alpha = 0.08f), modifier = Modifier.padding(vertical = 4.dp))
                         HistoryNutrition(recipe)
+                    }
+                }
+                if (session.conversation.isNotEmpty()) {
+                    TextButton(onClick = { showConversation = !showConversation },
+                        modifier = Modifier.fillMaxWidth().testTag("history-conversation-${session.id}")) {
+                        Text("Conversation", modifier = Modifier.weight(1f),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Start)
+                        Icon(if (showConversation) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = if (showConversation) "Hide conversation" else "Show conversation")
+                    }
+                    if (showConversation) {
+                        val messages = session.conversation
+                        if (messages.size > visibleMessages) TextButton(onClick = { visibleMessages += 30 }) {
+                            Text("Show earlier messages")
+                        }
+                        // The journal owns scrolling. Reveal older pages without a nested scrolling surface.
+                        messages.takeLast(visibleMessages).forEach { message ->
+                            Column(Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("${if (message.sender == "User") "You" else "VESCURUS"} · ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(message.createdAt))}",
+                                    color = muted, fontSize = 11.sp)
+                                Text(message.message, color = Color.White, fontSize = 14.sp, lineHeight = 20.sp)
+                            }
+                        }
                     }
                 }
 

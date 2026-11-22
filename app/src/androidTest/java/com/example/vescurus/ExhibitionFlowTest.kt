@@ -182,7 +182,7 @@ class ExhibitionFlowTest {
             assertEquals(EntryStatus.UNDONE,reloaded.history.single().entries.first { it.id==correctionId }.status)
             assertTrue(vm.exportJson().contains("MANUAL"))
         }
-        compose.onNodeWithTag("nav-track").performClick()
+        scroll("view-in-track");compose.onNodeWithTag("view-in-track").performClick()
         compose.onNodeWithText("Tomato & onion sauté",substring=true).assertExists()
         captureReview("history")
     }
