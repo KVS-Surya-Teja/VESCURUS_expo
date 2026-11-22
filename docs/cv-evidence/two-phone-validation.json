@@ -274,19 +274,19 @@
     }
   },
   "latestSoftwareBuild": {
-    "apkSha256": "8049079e4654d70c339bbcbe6dcf2c9cc038d08eb1d0e385baa5652e2a16c946",
+    "apkSha256": "2aa09cf14f4ef338245979c62fb3b2a2556b3daecffcd991971336ab7bda6042",
     "installedOnPhones": false,
-    "reason": "User intentionally disconnected both phones before the final UI and request-ownership changes.",
-    "jvmTests": 53,
+    "reason": "Phones intentionally disconnected; newest history, chat, nutrient and usability changes are not installed or physically verified.",
+    "jvmTests": 64,
     "pythonTests": 21,
     "androidTestsLastPhysicalPass": 7,
     "figmaDesign": "https://www.figma.com/design/Zcx3aNpssrtaWoefR8OLJJ",
     "hardwareScaleAvailable": false,
-    "ciUrl": "https://github.com/KVS-Surya-Teja/VESCURUS_expo/actions/runs/45055493437",
-    "verifiedAppRevision": "6a153938b088f586ebf3cd694a0c31a621ca9415",
-    "androidEmulatorPassed": 11,
+    "ciUrl": "https://github.com/KVS-Surya-Teja/VESCURUS_expo/actions/runs/45060003847",
+    "verifiedAppRevision": "2b5507bd7f3b626a4aba33057cbaa9cb6211b6b2",
+    "androidEmulatorPassed": 15,
     "androidEmulatorSkipped": 1,
-    "ciArtifactSha256": "247f96c860763803e1e531934ba97362c5b0ef698f9cc5cec3f58b74f464b2ce",
+    "ciArtifactSha256": "b70469d733711a58a9215bf4c79f5145041b3f133fc6273db9a0edb5ed3e9026",
     "textEndpointFinalHealth": {
       "httpStatus": 200,
       "reply": "Ready.",
@@ -418,6 +418,11 @@
         "Track and Settings navigation"
       ],
       "physicalRotationVerified": false
+    },
+    "historyReplication": {
+      "passed": "Real loopback TCP with separate private archives/preferences, exact conversations/JPEG bytes, reconnect and offline manager restart",
+      "physicalPhonesVerified": false,
+      "requires": "New APK on both phones and pairing. Existing records are retained; earlier never-persisted chats cannot be reconstructed."
     }
   }
 }

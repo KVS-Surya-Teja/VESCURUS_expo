@@ -40,12 +40,14 @@ Enter externally measured amounts manually, or leave quantities unknown.
     Keep the finished dish in view. **Track** shows the local photo when delivered,
     editable dish name (pencil), completion date and recorded active cooking time.
     Available recipe nutrition is explicitly approximate, not an intake measurement;
-    vitamins and missing values remain unavailable. Settings exports **Save a copy**.
+    vitamins and minerals appear only when supplied by the recipe source. Missing values
+    remain unavailable. Settings exports **Save a copy**.
 
 ## Backend and local data
 
 The Guide phone hosts the existing Ktor WebSocket service. Cook owns recipe choice,
-confirmed entries, correction/undo audit, step and pause state. Guide receives small
+confirmed entries, correction/undo audit, step and pause state. Both phones now retain
+local Track copies, including full corresponding conversations and finished photos. Guide receives small
 session/version/context updates and supplies frame-bound observations and bounded
 live frames. There is no separately hosted backend, cloud database, new subscription,
 or required laptop server. `/health` on Guide identifies protocol 2.
@@ -82,8 +84,58 @@ secret protection. No keys or Wi-Fi credentials were added to Git or logs.
 No usable local model asset exists. The unused, non-16-KB-aligned ONNX 1.17 runtime
 was removed. The old implementation is retained under `tools/reference/` for future
 verification. Local mode explicitly reports unavailable and never silently switches
-providers. Missing nutrition is unavailable. Built-in guides are labelled as such,
+providers. Missing nutrition is unavailable. Sourced vitamins/minerals keep their own mg, µg or
+IU units and appear in a collapsed, source-labelled per-serving estimate. Invalid,
+conflicting and missing nutrient values are omitted; AI suggestions gain no invented
+nutrition. Built-in guides are labelled as such,
 not presented as Spoonacular results or measured food intake.
+
+### Track and conversation preservation on both phones
+
+Every actual session message is stored with stable identity, sender, verbatim text
+and wall-clock timestamp in `CookingSession.conversation`. This includes recognition,
+user questions, assistant replies and useful failure notices. Saved sessions and
+chat-only drafts keep their conversation when reopened; starting another session
+cancels pending replies so they cannot enter the wrong record. Retrying a failed
+reply keeps one user prompt and one planning preference instead of duplicating them.
+Historical conversations are viewable in Track, collapsed by default, with earlier
+messages revealed 30 at a time. This display pagination never truncates stored chat.
+Chats from older builds that never persisted them cannot be reconstructed.
+
+Both paired roles publish their genuine local records into an additive local archive
+at `files/history-replica/`. Omission from a later list does not delete a record.
+Metadata and photos transfer over the existing authenticated local WebSocket in
+64-KiB chunks, with SHA-256 identities, checked offsets, restart-safe staging and
+fsynced atomic commits. Remote file paths are stripped and replaced with local
+content-addressed paths. The sender only receives a durable acknowledgement after
+any associated photo has also been saved. Reconnect resends unacknowledged records;
+Track remains readable offline. A failure retains originals and offers retry.
+No paid service, account, hosted database or manufactured meals are added.
+
+All sessions and full conversations are retained; there is no arbitrary history-count
+limit. Redundant timer updates are coalesced (30-second active checkpoints), with
+latest plus one previous session revision retained for recovery rather than creating
+a new full transcript copy on every tick. Normal APK updates must use `adb install -r`
+without uninstalling or clearing app data. A second-phone copy is redundancy, not a
+guarantee against deleting both applications/data. Settings' JSON export includes
+conversation text; photo files are retained on each phone rather than embedded in JSON.
+
+Guide Track is read-only. Cook edits/resumes its own current records; peer copies
+remain viewable without silently taking over the other phone's session. The finish
+screen links directly to Track, separates saving status from an absent dish photo,
+and permits requesting the photo again after reconnection. Back returns from
+Track/Settings to Cook and from Ingredients/Recipes to Assistant.
+
+### Usability reference and constraints
+
+The restored black startup/original logo, visible AI HUD and camera proportions are
+preserved. This refinement emphasizes recovery, readable task-first actions and
+honest saved/unsaved states rather than another visual overhaul. References reviewed:
+[Paprika Android cooking workflow](https://paprikaapp.com/help/v3/android/) and
+[Android supporting-pane guidance](https://developer.android.com/develop/adaptive-apps/guides/build-a-supporting-pane-layout).
+Mobbin's detailed catalogue was not exposed through available web access and no
+Mobbin connector was available; no claim is made to have copied or reviewed its
+restricted screens. Figma AI reference-image limitations remain as documented below.
 
 ## Current exhibition refinement
 
@@ -93,7 +145,7 @@ The startup now uses the user's original `VESCURUS_with_text_to_the_right.svg`
 (source retained in `app/src/main/artwork/`). Its paths and Cambria wordmark are
 outlined into `vescurus_startup_brand.xml`; no replacement logo or rendered glow.
 The launch window, system bars and entrance background are pure black. The
-original 0.8→1 zoom/fade (1000 ms), 2200 ms hold and 600 ms transition remain.
+original 0.8→1 zoom/fade (1000 ms), 2200 ms entrance duration and 600 ms transition remain.
 The full lockup fits the safe viewport in either orientation; no duplicate title
 or tagline is added.
 The camera and chat remain central. The restored full-width camera uses about
@@ -117,9 +169,26 @@ labels draw after outlines. Confidence appears with the actual recognition propo
 Internal frame/session IDs, model names, revisions and audit disclosures stay out
 of product screens.
 Full machine-readable evidence remains in exported records and developer logs.
-Camera phone navigation contains Camera and Settings; cooking history belongs to
-Cooking phone. Demo/Practice is removed from the role picker, including restoration
+Camera phone navigation contains Camera, Track and Settings. Track is read-only
+on Guide and includes its offline local copies; cooking operations remain on Cook. Demo/Practice is removed from the role picker, including restoration
 of a previously saved Demo role. Existing stored records are preserved.
+
+### Whole-conversation acceptance review
+
+| Requested behavior | Current evidence / remaining boundary |
+| --- | --- |
+| Original startup, black background, zoom, saved roles | Original supplied vector/outlined wordmark and original timing; fresh launch and viewport tests. |
+| Prominent camera, visible AI HUD, persistent typed/dictated assistant | Native layout tests; latest physical rotation/keyboard/camera verification still pending. |
+| Cook controls; Guide holds camera; recognize one item, review confidence/condition | Implemented with correlated frame/session/request identity; earlier real multi-food and empty scenes, current-prompt photo replay. |
+| Explicit quantities, correction, Next / Find recipes | Manual/unknown amounts supported; no invented scale readings or inferred transfer. |
+| Real calibrated weighing, five-second settling, LCD grams | Gate prepared and tested; ESP32/sketch/stand unavailable, so transport, final calibration and measured performance remain pending. |
+| Dietary/time preferences, pantry nuance, mistakes and corrections | Saved planning notes + full conversation + contextual AI requests; source-backed structured recipe checks passed. Recovery is conversational advice, not automatic rewriting of remaining recipe steps. |
+| Natural speech, speaker 5, speed 1.1 | Kitten local provider benchmark passed on Samsung; separate provider/model installation remains required. |
+| Pause/resume, user-controlled timer/step advancement | Automated flow and earlier physical checks; timer expiry never advances steps. |
+| Finish photo, editable title, time/date, nutrition, journal | Implemented, sourced nutrient units retained; no new real cooked meal or mounted-scale nutrition/intake claim. |
+| Histories, full chats and photos on both phones | Bidirectional private archive + real socket separate-storage tests; final two-physical-phone upgrade verification remains pending. Older unsaved chats cannot be recreated. |
+| No Demo, consumer-facing screens, original brand and useful animation | Demo unreachable in product; legacy records/tests isolated and preserved. No fake cooking history added. |
+| Local/simple backend, ordinary commits and preserved application data | Existing phone-hosted Ktor service reused, private atomic files, install-over-existing-data workflow; no separately hosted database. |
 
 ### Natural offline speech
 
@@ -247,7 +316,7 @@ in the final verification below; the engine change is not itself proof of succes
 
 ### Final verification gate
 
-Latest local debug APK available for later installation: `8049079e4654d70c339bbcbe6dcf2c9cc038d08eb1d0e385baa5652e2a16c946`.
+Latest local debug APK available for later installation: `2aa09cf14f4ef338245979c62fb3b2a2556b3daecffcd991971336ab7bda6042`.
 
 Last physically installed debug APK SHA-256 (both devices, before disconnection):
 `bef216dd77a0078a57f71de5e6adc7ad7d2121d948afb17f82b3e96fd7d4e0b2`.
@@ -255,7 +324,7 @@ Redmi `aibyojwcfyemdmce` and Samsung `RZ8M906DQ3K` were independently checked
 against the local APK; data was preserved. Natural voice provider is additionally
 installed on Samsung. Physical camera/control checks used these two devices.
 
-The final build completed application/test APKs, **53 JVM tests with no failures**,
+The final build completed application/test APKs, **64 JVM tests with no failures**,
 and lint with **0 errors** (warnings/hints remain). **21 Python API tests**
 also passed, covering preparation and request-correlation parity. The earlier lint internal FIR
 analysis failure did not recur on the successful gate. Seven Android tests passed on Samsung (61.64 seconds), including non-skipped
@@ -265,14 +334,29 @@ The preparation-only revision/audit correction, later UI refinement and recipe-j
 ownership fixes were added afterward. The user intentionally disconnected both
 phones; the newest APK needs later physical installation/recheck. Two additional
 Android regression cases cover late recipe replies and starting cooking while a
-planner is pending. The [successful GitHub gate](https://github.com/KVS-Surya-Teja/VESCURUS_expo/actions/runs/45055493437)
-verified application revision `6a153938b088f586ebf3cd694a0c31a621ca9415`: **53 JVM
-tests; 11 Android tests passed, 1 optional installed-voice test skipped** on API 35;
+planner is pending. The [successful GitHub gate](https://github.com/KVS-Surya-Teja/VESCURUS_expo/actions/runs/45060003847)
+verified application revision `2b5507bd7f3b626a4aba33057cbaa9cb6211b6b2`: **64 JVM
+tests; 15 Android tests passed, 1 optional installed-voice test skipped** on API 35;
 app/test APK builds and lint completed with 0 errors. The real voice generation
 pass belongs to Samsung, not that emulator skip. The downloaded CI artifact was
-verified against SHA-256 `247f96c860763803e1e531934ba97362c5b0ef698f9cc5cec3f58b74f464b2ce`.
+verified against SHA-256 `b70469d733711a58a9215bf4c79f5145041b3f133fc6273db9a0edb5ed3e9026`.
 
-Three additional Android tests exercise 360×720 and 800×360 dp configurations:
+New history checks passed on real loopback TCP using **separate private storage
+and preferences per simulated peer**, not a shared-file shortcut. They verify
+bidirectional union, complete timestamped chats, exact JPEG bytes, durable ACKs,
+reconnection, offline restart and no duplicate records. Other Android cases verify
+failed-reply retry without duplicate prompts/preferences, chat-only draft reload
+and resumption, stale-reply rejection, read-only Guide history, full conversation
+expansion and tiny/large nutrient values with correct units. Seven JVM archive
+cases include 121 records, metadata above 3 MB, interrupted/corrupted transfer,
+local-path protection and bounded redundant revision growth. Four nutrient JVM
+cases cover source units/conflicts, invalid/missing values and backwards-compatible
+serialization. The older exhibition fixture's View-in-Track callback omission was
+fixed; the complete final gate passes. These are **not** two physical phones or a
+real cooked meal. Both phones need the new APK and pairing before their genuine
+history starts copying; the last installed build remains unchanged above.
+
+Three Android tests exercise 360×720 and 800×360 dp configurations:
 startup/role selection/Guide, camera and AI HUD plus retained chat draft and ingredient
 actions, and Track/Settings navigation. These are controlled Compose viewport tests,
 not physical rotation or camera sensor checks on the disconnected phones. The
