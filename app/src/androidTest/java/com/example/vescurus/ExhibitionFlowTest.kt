@@ -97,7 +97,8 @@ class ExhibitionFlowTest {
         }
         compose.waitUntil(15000) { !vm.isLoading }
         compose.onNodeWithTag("chat-input").assertIsDisplayed()
-        val roomForCamera=compose.onRoot().getUnclippedBoundsInRoot().height>=500.dp
+        val bounds=compose.onRoot().getUnclippedBoundsInRoot()
+        val roomForCamera=bounds.bottom-bounds.top>=500.dp
         if(roomForCamera) {
             compose.onNodeWithTag("camera-live").assertIsDisplayed().assertIsSelected()
             captureReview("cook-home")
