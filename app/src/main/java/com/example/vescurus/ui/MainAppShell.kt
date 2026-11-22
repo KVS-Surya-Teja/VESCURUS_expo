@@ -1,17 +1,17 @@
 package com.example.vescurus.ui
 
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.RestartAlt
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -19,7 +19,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -44,6 +46,7 @@ fun MainAppShell(
 ) {
     val connectionManager: VescurusConnectionManager = viewModel()
     val cookViewModel: CookViewModel = viewModel()
+    val haptic = LocalHapticFeedback.current
 
     val context = LocalContext.current
     val connectionStatus by connectionManager.status.collectAsState(initial = ConnectionStatus.IDLE)
@@ -58,12 +61,11 @@ fun MainAppShell(
     }
 
     DisposableEffect(Unit) {
-        onDispose {
-            connectionManager.stop()
-        }
+        onDispose { connectionManager.stop() }
     }
 
     var selectedItem by remember { mutableStateOf(0) }
+    val previousItem = remember { mutableStateOf(0) }
     val items = listOf(NavItem.Cook, NavItem.Track, NavItem.Settings)
 
     Scaffold(
@@ -71,25 +73,39 @@ fun MainAppShell(
             NavigationBar(
                 containerColor = Color(0xFF020617),
                 contentColor = GoldPrimary,
-                tonalElevation = 8.dp
+                tonalElevation = 0.dp,
+                modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars)
             ) {
                 items.forEachIndexed { index, item ->
+                    val selected = selectedItem == index
                     NavigationBarItem(
-                        icon = { Icon(item.icon, contentDescription = item.label) },
+                        icon = {
+                            Icon(
+                                item.icon,
+                                contentDescription = item.label,
+                                modifier = Modifier.size(if (selected) 24.dp else 22.dp)
+                            )
+                        },
                         label = {
                             Text(
                                 item.label,
-                                fontSize = 11.sp,
-                                fontWeight = if (selectedItem == index) FontWeight.Bold else FontWeight.Normal,
-                                color = if (selectedItem == index) GoldPrimary else Color.White.copy(alpha = 0.5f)
+                                fontSize = 10.sp,
+                                fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.Normal,
+                                color = if (selected) GoldPrimary else Color.White.copy(alpha = 0.4f)
                             )
                         },
-                        selected = selectedItem == index,
-                        onClick = { selectedItem = index },
+                        selected = selected,
+                        onClick = {
+                            if (index != selectedItem) {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                previousItem.value = selectedItem
+                                selectedItem = index
+                            }
+                        },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = GoldPrimary,
-                            unselectedIconColor = Color.White.copy(alpha = 0.5f),
-                            indicatorColor = GoldPrimary.copy(alpha = 0.15f)
+                            unselectedIconColor = Color.White.copy(alpha = 0.4f),
+                            indicatorColor = GoldPrimary.copy(alpha = 0.12f)
                         )
                     )
                 }
@@ -97,34 +113,42 @@ fun MainAppShell(
         },
         containerColor = Color(0xFF020617)
     ) { innerPadding ->
-        Surface(
-            modifier = Modifier.padding(innerPadding),
-            color = Color(0xFF020617)
+        Box(
+            modifier = Modifier
+                .padding(innerPadding)
+                .fillMaxSize()
+                .background(Color(0xFF020617))
         ) {
-            Column {
-                when (items[selectedItem]) {
+            // Animated tab content — slide direction based on tab index
+            val goingRight = selectedItem > previousItem.value
+            AnimatedContent(
+                targetState = selectedItem,
+                transitionSpec = {
+                    if (goingRight) {
+                        (slideInHorizontally(tween(280, easing = EaseOutCubic)) { it / 3 } + fadeIn(tween(280)))
+                            .togetherWith(slideOutHorizontally(tween(280, easing = EaseInCubic)) { -it / 3 } + fadeOut(tween(200)))
+                    } else {
+                        (slideInHorizontally(tween(280, easing = EaseOutCubic)) { -it / 3 } + fadeIn(tween(280)))
+                            .togetherWith(slideOutHorizontally(tween(280, easing = EaseInCubic)) { it / 3 } + fadeOut(tween(200)))
+                    }
+                },
+                label = "TabTransition"
+            ) { tabIndex ->
+                when (items[tabIndex]) {
                     NavItem.Cook -> {
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            RoleSpecificCookScreen(
-                                selectedRole = selectedRole,
-                                connectionStatus = connectionStatus,
-                                diagnostics = diagnostics,
-                                detections = detections,
-                                latestFrame = latestFrame,
-                                onBroadcastDetection = { newDetections ->
-                                    connectionManager.broadcastDetection(newDetections)
-                                },
-                                onBroadcastFrame = { frameBytes ->
-                                    connectionManager.broadcastFrame(frameBytes)
-                                },
-                                onSnapshot = { connectionManager.sendSnapshotCommand() },
-                                onDirectConnect = { ip, port ->
-                                    connectionManager.connectDirectly(ip, port)
-                                },
-                                viewModel = cookViewModel,
-                                onBack = onResetRole
-                            )
-                        }
+                        RoleSpecificCookScreen(
+                            selectedRole = selectedRole,
+                            connectionStatus = connectionStatus,
+                            diagnostics = diagnostics,
+                            detections = detections,
+                            latestFrame = latestFrame,
+                            onBroadcastDetection = { connectionManager.broadcastDetection(it) },
+                            onBroadcastFrame = { connectionManager.broadcastFrame(it) },
+                            onSnapshot = { connectionManager.sendSnapshotCommand() },
+                            onDirectConnect = { ip, port -> connectionManager.connectDirectly(ip, port) },
+                            viewModel = cookViewModel,
+                            onBack = onResetRole
+                        )
                     }
                     NavItem.Track -> TrackScreen(viewModel = cookViewModel)
                     NavItem.Settings -> AccountScreen(selectedRole, cookViewModel, onResetRole, connectionManager)
@@ -154,9 +178,7 @@ fun RoleSpecificCookScreen(
                 status = connectionStatus,
                 diagnostics = diagnostics,
                 detections = detections,
-                onDetectionsUpdated = {
-                    onBroadcastDetection(it)
-                },
+                onDetectionsUpdated = { onBroadcastDetection(it) },
                 onFrameAvailable = onBroadcastFrame,
                 onBack = onBack
             )
@@ -206,11 +228,13 @@ fun AccountScreen(
     onResetRole: () -> Unit,
     connectionManager: VescurusConnectionManager
 ) {
+    val haptic = LocalHapticFeedback.current
     val localIp = remember { connectionManager.getLocalIpAddress() }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.statusBars)
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween
@@ -279,7 +303,7 @@ fun AccountScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // TTS Setting Card
+            // TTS Toggle Card
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 color = Color(0xFF0F172A),
@@ -308,7 +332,10 @@ fun AccountScreen(
                     }
                     Switch(
                         checked = viewModel.isTtsEnabled,
-                        onCheckedChange = { viewModel.isTtsEnabled = it },
+                        onCheckedChange = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            viewModel.isTtsEnabled = it
+                        },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = GoldPrimary,
                             checkedTrackColor = GoldPrimary.copy(alpha = 0.4f)
@@ -320,7 +347,10 @@ fun AccountScreen(
 
         // Switch Role Button
         Button(
-            onClick = onResetRole,
+            onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onResetRole()
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp),
