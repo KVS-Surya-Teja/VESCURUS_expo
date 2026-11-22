@@ -1,28 +1,30 @@
 # VESCURUS exhibition build
 
 22 November 2026. Kotlin/Compose; existing Guide, Cook and Demonstration roles retained.
-This build deliberately bypasses the unavailable physical scale. No scale reading,
-calibration result or ingredient mass is fabricated. Explicit manual amounts and
-unknown quantities are supported.
+The role picker presents them as Camera phone, Cooking phone and Practice session.
+Live scale transport and mounted calibration are not integrated in this branch.
+Enter externally measured amounts manually, or leave quantities unknown.
 
 ## Setup
 
 1. Install `app/build/outputs/apk/debug/app-debug.apk` on both phones.
 2. Connect both phones to the same internet-capable Wi-Fi/hotspot. USB debugging is
    for installation/testing; it is not the application transport.
-3. Set the camera phone to Guide and the companion phone to Cook.
+3. Select **Camera phone** on Guide and **Cooking phone** on the companion.
 4. On Cook, enter the Guide address, port **8766**, and its six-digit pairing code.
-   A synchronized session/version must appear on both phones before relying on it.
-5. Guide: tap **Analyze scene**, or deliberately enable Auto. Cook: open the camera
-   panel and choose either Live preview or the matching Analyzed snapshot.
-6. Review a proposed identity or add one manually. Enter a measured amount yourself
-   or leave it unknown. Confirm transfer separately after actually transferring it.
-7. Search Spoonacular explicitly, choose a saved result, or browse labelled built-in
-   offline guides. Check recipe targets and additional ingredients separately.
-8. Start the recipe, explicitly complete steps, pause/resume as needed, and explicitly
-   confirm final completion. Timer expiry only prompts a check.
-9. History retains completed sessions and saved drafts. System exports JSON through
-   Android's document picker. Demonstration records are separate from live records.
+   The connection status must show the phones are connected. Session/version details
+   are available under **Settings → Advanced details** when investigating a problem.
+5. Guide: tap **Analyze scene**, or deliberately enable Auto. Cook's camera is visible
+   by default in portrait. Choose **Live preview** or the matching **Analyzed frame**.
+6. In **Ingredients**, review a camera proposal or add an ingredient manually. Enter
+   a measured amount or leave it unknown. Confirm addition separately after transferring it.
+7. In **Recipes**, search Spoonacular, choose a saved result, or browse offline recipes.
+   Check recipe ingredients and additional ingredients separately.
+8. Choosing a recipe returns to **Assistant**. Start cooking, explicitly complete steps,
+   and confirm final completion. Pause/resume and step reminders remain available.
+   Timer expiry only prompts a check. Chat is available before and during cooking.
+9. **History** retains completed sessions and saved drafts. **Settings** exports JSON
+   through Android's document picker. Practice records remain separate from live records.
 
 ## Backend and local data
 
@@ -37,7 +39,7 @@ previous-valid backups, and retrieved `recipes.json`. Writes use a fsynced pendi
 file and replacement, with recovery rather than overwriting malformed data. Startup
 retains session identity; recovered cooking resumes paused. Only the latest pending
 full-state write is queued; every committed entry is included in that snapshot.
-Android automatic backup is disabled; intentional export is available in System.
+Android automatic backup is disabled; intentional export is available in Settings.
 Export includes schema/session/event IDs, units, evidence source, confirmation and
 correction history. It omits API keys and camera image data.
 
@@ -53,7 +55,65 @@ verification. Local mode explicitly reports unavailable and never silently switc
 providers. Missing nutrition is unavailable. Built-in guides are labelled as such,
 not presented as Spoonacular results or measured food intake.
 
-## Verification record
+## Cook interface refresh
+
+The UI combines the camera/chat presentation of `198b88a` with the CV and session
+implementation of `87752d3`. Live video has no detection boxes. Analysis displays
+the exact image and dimensions supplied by its observation. Camera capture,
+recognition, transport, freshness and session reducers were retained.
+
+- The existing startup logo fade/scale animation and screen transition are retained.
+  A fresh launch shows the entrance before opening the saved phone role. Restored
+  screen state after the entrance avoids replaying it on ordinary activity recreation.
+- Cook has Assistant, Ingredients and Recipes workspaces, with a persistent chat
+  composer in Assistant. The current instruction appears above conversation.
+- The camera minimizes for the keyboard and small viewports; it can also be collapsed.
+- Session IDs, revisions, engine and frame details are in Settings disclosures.
+  Recognition failures, connection problems and save errors remain visible.
+- Assistant requests include recent conversation and the current confirmed session.
+  Replies and speech are cleared when switching sessions. Chat requests do not
+  include a camera image and must not claim to observe food.
+- Guide's history is read-only; draft resumption is available in Cooking/Practice.
+- `CookPreviews.kt` uses current components, including a narrow, larger-font recipe
+  card. These are component previews, not a simulated full-screen workflow.
+
+## Verification of this UI refresh
+
+The application revision was verified by [GitHub Actions run 45015967411](https://github.com/KVS-Surya-Teja/VESCURUS_expo/actions/runs/45015967411)
+at commit `3f056a58ceef3b16bb81ae5af296a101df7ed885`:
+
+- Debug application and Android test APKs compiled successfully.
+- **33 JVM tests passed**. New assistant-context cases cover conversation history,
+  recipe/step context, distinct units, unknown quantities and bounded history.
+- **5 Android tests passed** on an Android 15/API 35 Pixel 5 emulator. These cover
+  camera/chat reachability, explicit non-egg recipe completion, pause/resume,
+  timer behavior, storage recovery and the existing loopback protocol checks.
+- Lint completed with **0 errors**, 86 warnings and 2 hints. Existing dependency,
+  resource and style warnings remain; this is not a warning-free build.
+
+These checks use isolated test/manual data and do not call live cloud vision or
+Spoonacular. The physical-phone evidence below belongs to the preceding CV build;
+it does not establish that this UI revision has been installed on either phone.
+After pulling and building locally, install the same APK on both phones and check
+live video, a matching analyzed frame, chat, and recipe pause/save/resumption.
+
+### Native UI review
+
+These unedited images come from the successful Android emulator run above.
+Cook home is an isolated CookScreen with safe system insets and no paired camera;
+the active step is the full app shell in explicitly labelled Practice mode, using
+manual Tomato/Onion test data. They demonstrate layout, not live recognition or
+weighing. The former image intentionally omits the outer shell navigation.
+
+| Camera and Assistant workspace | Active cooking and chat |
+| --- | --- |
+| ![Unpaired Cook camera and Assistant](ui-review/cook-home.png) | ![Practice recipe step and chat](ui-review/cooking-step.png) |
+
+The CI runner clears only a specifically identified background Pixel Launcher ANR
+if it obstructs review; application errors and test failures remain visible. Full
+reports and additional captures are retained in the linked run's artifact.
+
+## Previous physical build verification (`87752d3`)
 
 - Latest JVM run: **29 tests passed**; actual results are retained under
   `app/build/test-results/testDebugUnitTest`. Optional CV/API adapter: **17 tests passed**.
