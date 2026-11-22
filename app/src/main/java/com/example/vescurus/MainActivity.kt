@@ -66,7 +66,9 @@ fun VESCURUSApp() {
     val context=LocalContext.current
     val prefs=remember { context.getSharedPreferences("vescurus",0) }
     var selectedRole by rememberSaveable { mutableStateOf(runCatching { Role.valueOf(prefs.getString("role","NONE")!!) }.getOrDefault(Role.NONE)) }
-    var currentScreen by rememberSaveable { mutableStateOf(if(selectedRole==Role.NONE) Screen.Splash else Screen.MainApp) }
+    // Keep the branded entrance on a fresh launch, then resume the saved phone role.
+    // Saved screen state still prevents replaying it on an activity recreation.
+    var currentScreen by rememberSaveable { mutableStateOf(Screen.Splash) }
 
     Crossfade(
         targetState = currentScreen,
