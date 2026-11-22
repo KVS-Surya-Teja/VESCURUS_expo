@@ -29,7 +29,7 @@ class OnDeviceYoloIngredientDetector(context: Context) {
                     supported = detection.is_supported
                 )
             }
-            is AnalyzeImageUseCase.Result.Failure -> emptyList()
+            is AnalyzeImageUseCase.Result.Failure -> throw InferenceFailure(result.status, result.message)
         }
     }
 }

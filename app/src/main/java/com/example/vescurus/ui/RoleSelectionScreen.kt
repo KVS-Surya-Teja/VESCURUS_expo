@@ -4,6 +4,8 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -58,9 +60,9 @@ fun RoleSelectionScreen(onRoleSelected: (Role) -> Unit) {
             .padding(horizontal = 24.dp, vertical = 16.dp)
     ) {
         Column(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween
+            verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
             // Animated Header
             AnimatedVisibility(
@@ -78,7 +80,7 @@ fun RoleSelectionScreen(onRoleSelected: (Role) -> Unit) {
                         modifier = Modifier.padding(bottom = 14.dp)
                     ) {
                         Text(
-                            text = "V0 TWO-DEVICE ECOSYSTEM",
+                            text = "VESCURUS COOKING COMPANION",
                             color = GoldPrimary,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
@@ -124,17 +126,17 @@ fun RoleSelectionScreen(onRoleSelected: (Role) -> Unit) {
                 val cards = listOf(
                     CardDef(
                         "GUIDE (VISION)", "OVERHEAD",
-                        "Mount above stove. Observes flat tawa, detects food & streams real-time P2P frames.",
+                        "Mount safely above the preparation area. Analyze ingredients and share matching snapshots with Cook.",
                         Icons.Default.Videocam, Color(0xFF38BDF8), Role.GUIDE
                     ),
                     CardDef(
                         "COOK (COMPANION)", "CHEF ASSIST",
-                        "Interactive touch display. Suggests tawa recipes, guides timelines & speaks steps.",
+                        "Confirm ingredients, follow recipes at your pace, and keep a local cooking record.",
                         Icons.Default.Restaurant, GoldPrimary, Role.COOK
                     ),
                     CardDef(
                         "DEMONSTRATION", "STANDALONE",
-                        "Explore interface, tawa recipe library and nutritional telemetry independently.",
+                        "Practise with offline guides and separate local records. No simulated camera or scale evidence.",
                         Icons.Default.AutoAwesome, Color(0xFFA855F7), Role.DEMONSTRATE
                     )
                 )
@@ -167,7 +169,7 @@ fun RoleSelectionScreen(onRoleSelected: (Role) -> Unit) {
 
             // Footer
             Text(
-                text = "VESCURUS IoT Lab Examination • Flat-Tawa System",
+                text = "Prepare • Cook • Keep your record",
                 color = Color.White.copy(alpha = 0.35f),
                 fontSize = 11.sp,
                 letterSpacing = 1.sp,

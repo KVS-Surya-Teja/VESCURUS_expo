@@ -27,6 +27,21 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.example.vescurus.GoldPrimary
 import com.example.vescurus.model.DetectionResult
 import com.example.vescurus.model.Role
@@ -35,40 +50,60 @@ import com.example.vescurus.network.VescurusConnectionManager
 
 sealed class NavItem(val route: String, val icon: ImageVector, val label: String) {
     object Cook : NavItem("cook", Icons.Default.Tune, "Cook & Vision")
-    object Track : NavItem("track", Icons.Default.Info, "Nutrition")
+    object Track : NavItem("track", Icons.Default.Info, "History")
     object Settings : NavItem("settings", Icons.Default.RestartAlt, "System")
 }
 
 @Composable
 fun MainAppShell(
     selectedRole: Role,
-    onResetRole: () -> Unit
+    onResetRole: () -> Unit,
+    cookViewModel: CookViewModel = viewModel()
 ) {
     val connectionManager: VescurusConnectionManager = viewModel()
-    val cookViewModel: CookViewModel = viewModel()
     val haptic = LocalHapticFeedback.current
+    val appView=androidx.compose.ui.platform.LocalView.current
+    DisposableEffect(appView,selectedRole) {
+        val previous=appView.keepScreenOn
+        appView.keepScreenOn=selectedRole!=Role.NONE
+        onDispose { appView.keepScreenOn=previous }
+    }
 
     val context = LocalContext.current
-    val connectionStatus by connectionManager.status.collectAsState(initial = ConnectionStatus.IDLE)
-    val diagnostics by connectionManager.diagnostics.collectAsState(initial = "")
-    val detections by connectionManager.latestDetections.collectAsState(initial = emptyList())
-    val latestFrame by connectionManager.latestFrame.collectAsState(initial = null)
+    val connectionStatus by connectionManager.status.collectAsStateWithLifecycle()
+    val diagnostics by connectionManager.diagnostics.collectAsStateWithLifecycle()
+    val detections by connectionManager.latestDetections.collectAsStateWithLifecycle()
+
+    val observation by connectionManager.observation.collectAsStateWithLifecycle()
+    val peerSession by connectionManager.sessionContext.collectAsStateWithLifecycle()
+    val ownPairCode by connectionManager.pairCode.collectAsStateWithLifecycle()
 
     LaunchedEffect(selectedRole) {
+        cookViewModel.setDemonstration(selectedRole == Role.DEMONSTRATE)
         if (selectedRole != Role.NONE) {
             connectionManager.start(context, selectedRole)
         }
     }
 
-    DisposableEffect(Unit) {
-        onDispose { connectionManager.stop() }
+    LaunchedEffect(selectedRole, cookViewModel.isLoading, cookViewModel.sessionVersion, cookViewModel.sessionId) {
+        if (selectedRole == Role.COOK && !cookViewModel.isLoading) connectionManager.updateSession(cookViewModel.sessionContext)
     }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if(event == Lifecycle.Event.ON_STOP) cookViewModel.pauseForBackground()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    DisposableEffect(selectedRole) { onDispose { connectionManager.stop() } }
 
-    var selectedItem by remember { mutableStateOf(0) }
+    var selectedItem by rememberSaveable { mutableStateOf(0) }
     val previousItem = remember { mutableStateOf(0) }
     val items = listOf(NavItem.Cook, NavItem.Track, NavItem.Settings)
 
     Scaffold(
+        modifier = Modifier.semantics { testTagsAsResourceId = true },
         bottomBar = {
             NavigationBar(
                 containerColor = Color(0xFF020617),
@@ -86,6 +121,7 @@ fun MainAppShell(
                                 modifier = Modifier.size(if (selected) 24.dp else 22.dp)
                             )
                         },
+                        modifier = Modifier.testTag("nav-${item.route}"),
                         label = {
                             Text(
                                 item.label,
@@ -139,15 +175,20 @@ fun MainAppShell(
                         RoleSpecificCookScreen(
                             selectedRole = selectedRole,
                             connectionStatus = connectionStatus,
-                            diagnostics = diagnostics,
+                            diagnostics = if(selectedRole==Role.GUIDE) diagnostics+"\nPairing code: "+ownPairCode+(peerSession?.let { "\nCook: ${it.recipe ?: "Preparing ingredients"} | step ${it.step+1}${if(it.paused) " | paused" else ""}" } ?: "") else diagnostics,
                             detections = detections,
-                            latestFrame = latestFrame,
+                            latestFrame = null,
+                            latestFrameFlow = connectionManager.latestFrame,
                             onBroadcastDetection = { connectionManager.broadcastDetection(it) },
                             onBroadcastFrame = { connectionManager.broadcastFrame(it) },
                             onSnapshot = { connectionManager.sendSnapshotCommand() },
                             onDirectConnect = { ip, port -> connectionManager.connectDirectly(ip, port) },
                             viewModel = cookViewModel,
-                            onBack = onResetRole
+                            onBack = onResetRole,
+                            observation = observation,
+                            sessionId = peerSession?.sessionId ?: "unpaired",
+                            onObservation = connectionManager::broadcastObservation,
+                            onVideoAvailable = connectionManager::broadcastVideo
                         )
                     }
                     NavItem.Track -> TrackScreen(viewModel = cookViewModel)
@@ -170,7 +211,12 @@ fun RoleSpecificCookScreen(
     onSnapshot: () -> Unit,
     onDirectConnect: (String, Int) -> Unit,
     viewModel: CookViewModel,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    observation: com.example.vescurus.model.Observation? = null,
+    sessionId: String = "unpaired",
+    onObservation: (com.example.vescurus.model.Observation) -> Unit = {},
+    onVideoAvailable: (com.example.vescurus.model.VideoFrame) -> Unit = {},
+    latestFrameFlow: kotlinx.coroutines.flow.StateFlow<ByteArray?>? = null
 ) {
     when (selectedRole) {
         Role.GUIDE -> {
@@ -180,7 +226,8 @@ fun RoleSpecificCookScreen(
                 detections = detections,
                 onDetectionsUpdated = { onBroadcastDetection(it) },
                 onFrameAvailable = onBroadcastFrame,
-                onBack = onBack
+                onBack = onBack,
+                observation = observation, sessionId = sessionId, onObservation = onObservation, onVideoAvailable = onVideoAvailable
             )
         }
         Role.COOK -> {
@@ -189,24 +236,18 @@ fun RoleSpecificCookScreen(
                 diagnostics = diagnostics,
                 detections = detections,
                 latestFrame = latestFrame,
+                latestFrameFlow = latestFrameFlow,
                 viewModel = viewModel,
                 onSnapshot = onSnapshot,
-                onDirectConnect = onDirectConnect
+                onDirectConnect = onDirectConnect,
+                observation = observation
             )
         }
         Role.DEMONSTRATE -> {
             CookScreen(
-                status = ConnectionStatus.CONNECTED,
-                diagnostics = "Standalone Demonstration",
-                detections = listOf(
-                    DetectionResult(
-                        label = "Egg",
-                        confidence = 0.94f,
-                        recipe_class = 0,
-                        box_2d = com.example.vescurus.model.BoundingBox(0.3f, 0.3f, 0.7f, 0.7f),
-                        supported = true
-                    )
-                ),
+                status = ConnectionStatus.IDLE,
+                diagnostics = "DEMONSTRATION • simulated observations • no physical evidence",
+                detections = emptyList(),
                 latestFrame = null,
                 viewModel = viewModel,
                 onSnapshot = {},
@@ -222,148 +263,58 @@ fun RoleSpecificCookScreen(
 }
 
 @Composable
-fun AccountScreen(
-    role: Role,
-    viewModel: CookViewModel,
-    onResetRole: () -> Unit,
-    connectionManager: VescurusConnectionManager
-) {
-    val haptic = LocalHapticFeedback.current
-    val localIp = remember { connectionManager.getLocalIpAddress() }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.statusBars)
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.SpaceBetween
-    ) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = "SYSTEM & DIAGNOSTICS",
-                color = GoldPrimary,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 2.sp
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = "Configuration",
-                color = Color.White,
-                fontSize = 24.sp,
-                fontWeight = FontWeight.ExtraBold
-            )
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Role Card
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = Color(0xFF0F172A),
-                shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "ACTIVE ROLE",
-                        color = Color.White.copy(alpha = 0.5f),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = role.name,
-                        color = GoldPrimary,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text(
-                        text = "LOCAL IP ADDRESS",
-                        color = Color.White.copy(alpha = 0.5f),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = localIp,
-                        color = Color.White,
-                        fontSize = 14.sp
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // TTS Toggle Card
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = Color(0xFF0F172A),
-                shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Voice Guidance (TTS)",
-                            color = Color.White,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = "Spoken step announcements & timing cues",
-                            color = Color.White.copy(alpha = 0.6f),
-                            fontSize = 12.sp
-                        )
-                    }
-                    Switch(
-                        checked = viewModel.isTtsEnabled,
-                        onCheckedChange = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            viewModel.isTtsEnabled = it
-                        },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = GoldPrimary,
-                            checkedTrackColor = GoldPrimary.copy(alpha = 0.4f)
-                        )
-                    )
-                }
+fun AccountScreen(role: Role, viewModel: CookViewModel, onResetRole: () -> Unit, connectionManager: VescurusConnectionManager) {
+    val context=LocalContext.current
+    val scope=rememberCoroutineScope()
+    val status by connectionManager.status.collectAsStateWithLifecycle()
+    val diagnostics by connectionManager.diagnostics.collectAsStateWithLifecycle()
+    val observation by connectionManager.observation.collectAsStateWithLifecycle()
+    val pairCode by connectionManager.pairCode.collectAsStateWithLifecycle()
+    val cameraFresh by connectionManager.cameraFresh.collectAsStateWithLifecycle()
+    val visionStatus by connectionManager.visionStatus.collectAsStateWithLifecycle()
+    var exportMessage by remember { mutableStateOf<String?>(null) }
+    val exporter=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if(uri!=null) {
+            val content=viewModel.exportJson()
+            scope.launch {
+                exportMessage=withContext(Dispatchers.IO) { runCatching {
+                    requireNotNull(context.contentResolver.openOutputStream(uri)).bufferedWriter().use { it.write(content) }
+                    "Session export saved."
+                }.getOrDefault("Export could not be saved. Your phone records are retained.") }
             }
         }
-
-        // Switch Role Button
-        Button(
-            onClick = {
-                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                onResetRole()
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp),
-            shape = RoundedCornerShape(14.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
-            border = BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.3f))
-        ) {
-            Text(
-                text = "Switch Device Role (Guide / Cook)",
-                color = GoldPrimary,
-                fontWeight = FontWeight.Bold,
-                fontSize = 14.sp
-            )
+    }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
+        Text("SYSTEM",color=GoldPrimary,fontSize=11.sp,fontWeight=FontWeight.Bold,letterSpacing=2.sp)
+        Text("Ready for your setup",color=Color.White,fontSize=27.sp,fontWeight=FontWeight.ExtraBold)
+        SessionCard("This device", "${role.name} · Android ${android.os.Build.VERSION.RELEASE}") {
+            Text("Local IP: ${connectionManager.getLocalIpAddress()}",color=Color.White,fontSize=13.sp)
+            Text("Guide peer: ${status.name.lowercase()}",color=Color.White,fontSize=13.sp)
+            Text(diagnostics.ifBlank { "No live peer session in this role." },color=Color(0xFF94A3B8),fontSize=12.sp)
+            if(role==Role.GUIDE)Text("Pairing code: $pairCode",color=GoldPrimary,fontSize=22.sp,fontWeight=FontWeight.Bold)
+            Text("Camera: ${if(cameraFresh) "fresh frames" else "no fresh stream"}",color=Color.White,fontSize=13.sp)
+            Text("Vision: $visionStatus",color=Color.White,fontSize=13.sp)
+            Text("Engine: ${com.example.vescurus.di.AppModule.engineDescription}",color=Color(0xFF94A3B8),fontSize=12.sp)
+            Text("Cloud vision and the optional assistant require internet. Local phone communication and saved cooking data do not.",color=Color(0xFF94A3B8),fontSize=12.sp)
         }
+        SessionCard("Scale", "Bypassed for this exhibition setup") {
+            Text("No live scale is connected. Quantities are entered manually and labelled as manual evidence. Calibration and live weighing will be enabled with the physical assembly.",color=Color(0xFF94A3B8),fontSize=13.sp)
+        }
+        SessionCard("Voice guidance") {
+            Row(verticalAlignment=Alignment.CenterVertically) {
+                Text("Speak step instructions",color=Color.White,modifier=Modifier.weight(1f))
+                Switch(viewModel.isTtsEnabled,{viewModel.toggleVoice()})
+            }
+            Text("Only step actions and timer reminders are announced. Camera frames never trigger repeated speech.",color=Color(0xFF94A3B8),fontSize=12.sp)
+        }
+        SessionCard("Stored on this phone") {
+            Text("Active session, history, correction audit and retrieved recipes are stored in app-private files. No hosted database is required. Demonstration records are separate.",color=Color(0xFF94A3B8),fontSize=13.sp)
+            Text("${viewModel.sessions.size} retained sessions · ${if(viewModel.isSaving) "saving…" else "local storage ready"}",color=Color.White,fontSize=13.sp)
+            Button(onClick={exporter.launch("vescurus-${viewModel.sessionId.take(8)}.json")},enabled=!viewModel.isLoading,modifier=Modifier.fillMaxWidth().testTag("export-session")){Text("Export sessions as JSON")}
+            exportMessage?.let { Text(it,color=GoldPrimary,fontSize=12.sp) }
+            viewModel.storageMessage?.let { Text(it,color=GoldPrimary);TextButton(onClick=viewModel::retrySave){Text("Retry save")} }
+        }
+        OutlinedButton(onClick=onResetRole,modifier=Modifier.fillMaxWidth().testTag("switch-role")){Text("Switch Guide / Cook / Demonstration")}
+        Text("VESCURUS · Kotlin / Compose · local session owner: Cook",color=Color(0xFF94A3B8),fontSize=11.sp)
     }
 }

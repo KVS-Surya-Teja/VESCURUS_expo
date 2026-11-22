@@ -8,7 +8,7 @@ object GeminiService {
     private val apiKey = BuildConfig.GEMINI_API_KEY
 
     val model = GenerativeModel(
-        modelName = "gemini-1.5-flash",
+        modelName = BuildConfig.GEMINI_MODEL,
         apiKey = apiKey,
         generationConfig = generationConfig {
             responseMimeType = "application/json"

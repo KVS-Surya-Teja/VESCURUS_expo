@@ -27,6 +27,9 @@ android {
         }
         val apiKey = (properties.getProperty("GEMINI_API_KEY") ?: "").trim('"')
         buildConfigField("String", "GEMINI_API_KEY", "\"$apiKey\"")
+        val geminiModel = properties.getProperty("GEMINI_MODEL", "gemini-3.1-flash-lite").trim('"')
+        require(geminiModel.matches(Regex("[a-zA-Z0-9._-]+")))
+        buildConfigField("String", "GEMINI_MODEL", "\"$geminiModel\"")
         val spoonacularKey = (properties.getProperty("SPOONACULAR_API_KEY") ?: "").trim('"')
         buildConfigField("String", "SPOONACULAR_API_KEY", "\"$spoonacularKey\"")
     }
@@ -97,7 +100,6 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
     implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.17.0")
     implementation("io.coil-kt:coil-compose:2.6.0")
     val cameraxVersion = "1.3.4"
     implementation("androidx.camera:camera-core:$cameraxVersion")

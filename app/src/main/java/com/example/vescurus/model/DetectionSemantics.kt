@@ -9,14 +9,10 @@ fun canonicalizeIngredientLabel(rawLabel: String): String? {
     val normalized = rawLabel.trim().lowercase(Locale.US)
     if (normalized.isEmpty()) return null
     
-    if (normalized.contains("unsupported") || normalized.contains("hazard") || 
-        normalized.contains("phone") || normalized.contains("cable") || normalized.contains("pen")) {
+    if (normalized in setOf("unsupported", "unsupported object", "hazard", "phone", "cable", "pen")) {
         return "Unsupported object"
     }
-
-    if (normalized.contains("egg")) {
-        return "Egg"
-    }
+    if (normalized in setOf("egg", "eggs", "boiled egg", "raw egg", "peeled egg", "egg in shell")) return "Egg"
 
     // Capitalize words cleanly for UI presentation (e.g. "chicken breast", "cherry tomato")
     return normalized.split(" ").joinToString(" ") { word ->

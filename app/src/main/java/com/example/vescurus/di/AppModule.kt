@@ -8,7 +8,7 @@ import com.example.vescurus.domain.repository.IngredientRepository
 import com.example.vescurus.domain.usecase.AnalyzeImageUseCase
 
 enum class DetectionEngine {
-    GEMINI,         // Cloud Gemini 1.5 Flash Vision Engine (V0 Reference)
+    GEMINI,         // Cloud Gemini REST image inference
     ON_DEVICE_YOLO, // 100% On-Device Standalone YOLO CV on Phone 1
     LAPTOP_YOLO     // Laptop Local REST Server (vescurus_yolo_server.py)
 }
@@ -18,7 +18,12 @@ object AppModule {
      * ACTIVE DETECTION ENGINE FOR CV:
      * Set to [DetectionEngine.GEMINI] for cloud AI multimodal food/egg detection.
      */
-    var activeEngine = DetectionEngine.GEMINI
+    val activeEngine = DetectionEngine.GEMINI
+    val engineDescription: String get() = when (activeEngine) {
+        DetectionEngine.GEMINI -> "GEMINI/${com.example.vescurus.BuildConfig.GEMINI_MODEL}"
+        DetectionEngine.ON_DEVICE_YOLO -> "ON_DEVICE_UNAVAILABLE (model/runtime not packaged)"
+        DetectionEngine.LAPTOP_YOLO -> "LAPTOP_YOLO (unverified)"
+    }
 
     // Laptop local server IP address if using LAPTOP_YOLO
     private const val LAPTOP_IP = "192.168.0.100"
@@ -28,6 +33,8 @@ object AppModule {
     fun init(context: Context) {
         appContext = context.applicationContext
     }
+
+    fun assetText(name: String): String = requireNotNull(appContext).assets.open(name).bufferedReader().use { it.readText() }
 
     fun getRepository(context: Context? = null): IngredientRepository {
         val ctx = context?.applicationContext ?: appContext

@@ -1,0 +1,80 @@
+{
+  "date": "2026-11-22",
+  "guide": "Redmi 22101316I / Android 13",
+  "cook": "Samsung SM-M307F / Android 11",
+  "transport": "Same Wi-Fi, Guide-hosted WebSocket, protocol 2",
+  "observations": [
+    {
+      "sessionId": "8402bd2f-42c9-4029-9311-0f7d456a6f2d",
+      "streamId": "e3dfb32a-cdc2-4ecd-a309-7a0f4abee038",
+      "frameId": 294,
+      "captureUptimeMs": 357208405,
+      "width": 480,
+      "height": 640,
+      "engine": "GEMINI/gemini-3.1-flash-lite",
+      "status": "SUCCESS",
+      "inferenceMs": 4296,
+      "sourceAgeMs": 4338,
+      "detections": [
+        {
+          "label": "Roasted Chickpeas",
+          "confidence": 0.98,
+          "box_2d": {
+            "top": 0.291,
+            "left": 0.195,
+            "bottom": 0.713,
+            "right": 0.775
+          }
+        }
+      ],
+      "rotationApplied": 90,
+      "check": "ingredient-present",
+      "cookReceipt": "Matched stream/frame accepted and Samsung screenshot inspected"
+    },
+    {
+      "sessionId": "8402bd2f-42c9-4029-9311-0f7d456a6f2d",
+      "streamId": "5c501db6-838d-403c-82f0-b4086c1bca23",
+      "frameId": 85,
+      "captureUptimeMs": 357339172,
+      "width": 480,
+      "height": 640,
+      "engine": "GEMINI/gemini-3.1-flash-lite",
+      "status": "SUCCESS",
+      "inferenceMs": 2786,
+      "sourceAgeMs": 2797,
+      "rotationApplied": 90,
+      "check": "ingredient-removed",
+      "cookReceipt": "Matched stream/frame accepted and Samsung screenshot inspected"
+    }
+  ],
+  "finalBuildReconnect": {
+    "sessionId": "8402bd2f-42c9-4029-9311-0f7d456a6f2d",
+    "version": 0,
+    "checks": [
+      {
+        "check": "Guide stopped",
+        "cookShowsReconnecting": true,
+        "staleObservationCleared": true,
+        "staleSynchronizedDiagnosticCleared": true
+      },
+      {
+        "check": "Guide restart",
+        "synchronized": true
+      },
+      {
+        "check": "Cook cold restart 1",
+        "synchronized": true,
+        "samePersistedSession": true,
+        "entryCount": 0
+      },
+      {
+        "check": "Cook cold restart 2",
+        "synchronized": true,
+        "samePersistedSession": true,
+        "entryCount": 0
+      }
+    ]
+  },
+  "installedApkSha256": "240871d80a326fd8dfb6d0fb2005cfc800be1349117a244bf4f480225a78901a",
+  "physicalDisplayConfirmation": "User confirmed the Samsung physical display looks normal during live preview; intermittent ADB screenshots omit static regions."
+}

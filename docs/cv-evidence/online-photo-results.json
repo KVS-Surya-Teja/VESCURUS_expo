@@ -1,0 +1,370 @@
+{
+  "date": "2026-11-22",
+  "summary": {
+    "cases": 15,
+    "pass": 15,
+    "fail": 0,
+    "blocked": 0,
+    "medianInferenceMs": 2088,
+    "minInferenceMs": 1267,
+    "maxInferenceMs": 4582,
+    "scope": "Online photographs plus documented synthetic placement transforms. Not physical camera or two-phone validation.",
+    "annotationReview": "One evaluator synonym omission corrected after visual source inspection; initial-results.json retained."
+  },
+  "results": [
+    {
+      "id": "001",
+      "path": ".local/vision/cases/001.jpg",
+      "required": [
+        "eggplant"
+      ],
+      "description": "single ingredient; lexical eggplant regression",
+      "split": "development",
+      "regions": {},
+      "outcome": "PASS",
+      "observed": "labels=['Eggplant']; missing=[]; unexpected=[]; position failures=[]",
+      "inferenceMs": 2310,
+      "apiRoundTripMs": 2382,
+      "engine": "GEMINI/gemini-3.1-flash-lite",
+      "initialOutcome": "PASS"
+    },
+    {
+      "id": "002",
+      "path": ".local/vision/cases/002.jpg",
+      "required": [
+        "tomato"
+      ],
+      "description": "three tomatoes; no count-to-recipe inference",
+      "split": "development",
+      "regions": {},
+      "outcome": "PASS",
+      "observed": "labels=['Tomato', 'Tomato', 'Tomato']; missing=[]; unexpected=[]; position failures=[]",
+      "inferenceMs": 2421,
+      "apiRoundTripMs": 2452,
+      "engine": "GEMINI/gemini-3.1-flash-lite",
+      "initialOutcome": "PASS"
+    },
+    {
+      "id": "003",
+      "path": ".local/vision/cases/003.jpg",
+      "required": [
+        "banana"
+      ],
+      "description": "banana bunch; separate quantity source required",
+      "split": "development",
+      "regions": {},
+      "outcome": "PASS",
+      "observed": "labels=['Banana']; missing=[]; unexpected=[]; position failures=[]",
+      "inferenceMs": 2177,
+      "apiRoundTripMs": 2234,
+      "engine": "GEMINI/gemini-3.1-flash-lite",
+      "initialOutcome": "PASS"
+    },
+    {
+      "id": "004",
+      "path": ".local/vision/cases/004.jpg",
+      "required": [
+        "tomato",
+        "onion",
+        "pepper"
+      ],
+      "description": "crowded mixed ingredients; no invented mass",
+      "split": "development",
+      "regions": {},
+      "outcome": "PASS",
+      "observed": "labels=['Red Onion', 'Tomato', 'Green Bell Pepper', 'White Onion']; missing=[]; unexpected=[]; position failures=[]",
+      "inferenceMs": 2637,
+      "apiRoundTripMs": 2729,
+      "engine": "GEMINI/gemini-3.1-flash-lite",
+      "initialOutcome": "FAIL",
+      "reviewNote": "Initial evaluator omitted white onion from the onion family. Source photograph visibly contains white onions at upper left; model output was correct. Prompt and model were unchanged."
+    },
+    {
+      "id": "005",
+      "path": ".local/vision/cases/005.jpg",
+      "required": [],
+      "description": "non-food people/control",
+      "split": "development",
+      "regions": {},
+      "outcome": "PASS",
+      "observed": "expected no food; got ",
+      "inferenceMs": 2048,
+      "apiRoundTripMs": 2096,
+      "engine": "GEMINI/gemini-3.1-flash-lite",
+      "initialOutcome": "PASS"
+    },
+    {
+      "id": "006",
+      "path": ".local/vision/cases/006.jpg",
+      "required": [],
+      "description": "white oval computer mouse/control",
+      "split": "development",
+      "regions": {},
+      "outcome": "PASS",
+      "observed": "expected no food; got ",
+      "inferenceMs": 1839,
+      "apiRoundTripMs": 2186,
+      "engine": "GEMINI/gemini-3.1-flash-lite",
+      "initialOutcome": "PASS"
+    },
+    {
+      "id": "007",
+      "path": ".local/vision/cases/007.jpg",
+      "required": [],
+      "description": "empty synthetic viewing region",
+      "split": "development",
+      "regions": {},
+      "outcome": "PASS",
+      "observed": "expected no food; got ",
+      "inferenceMs": 1742,
+      "apiRoundTripMs": 1868,
+      "engine": "GEMINI/gemini-3.1-flash-lite",
+      "initialOutcome": "PASS"
+    },
+    {
+      "id": "008",
+      "path": ".local/vision/cases/008.jpg",
+      "required": [
+        "eggplant"
+      ],
+      "description": "ingredient at upper left",
+      "split": "development",
+      "regions": {
+        "eggplant": [
+          0.027777777777777776,
+          0.015625,
+          0.35138888888888886,
+          0.3385416666666667
+        ]
+      },
+      "outcome": "PASS",
+      "observed": "labels=['Eggplant']; missing=[]; unexpected=[]; position failures=[]",
+      "inferenceMs": 2007,
+      "apiRoundTripMs": 2054,
+      "engine": "GEMINI/gemini-3.1-flash-lite",
+      "initialOutcome": "PASS"
+    },
+    {
+      "id": "009",
+      "path": ".local/vision/cases/009.jpg",
+      "required": [
+        "eggplant"
+      ],
+      "description": "same ingredient moved to lower right",
+      "split": "development",
+      "regions": {
+        "eggplant": [
+          0.6180555555555556,
+          0.6510416666666666,
+          0.9416666666666667,
+          0.9739583333333334
+        ]
+      },
+      "outcome": "PASS",
+      "observed": "labels=['Eggplant']; missing=[]; unexpected=[]; position failures=[]",
+      "inferenceMs": 2088,
+      "apiRoundTripMs": 2117,
+      "engine": "GEMINI/gemini-3.1-flash-lite",
+      "initialOutcome": "PASS"
+    },
+    {
+      "id": "010",
+      "path": ".local/vision/cases/010.jpg",
+      "required": [
+        "eggplant"
+      ],
+      "description": "ninety-degree rotation; changed orientation",
+      "split": "development",
+      "regions": {},
+      "outcome": "PASS",
+      "observed": "labels=['Eggplant']; missing=[]; unexpected=[]; position failures=[]",
+      "inferenceMs": 2433,
+      "apiRoundTripMs": 2497,
+      "engine": "GEMINI/gemini-3.1-flash-lite",
+      "initialOutcome": "PASS"
+    },
+    {
+      "id": "011",
+      "path": ".local/vision/cases/011.jpg",
+      "required": [
+        "eggplant"
+      ],
+      "description": "partial occlusion with neutral rectangle; synthetic stress fixture",
+      "split": "development",
+      "regions": {},
+      "outcome": "PASS",
+      "observed": "labels=['Eggplant']; missing=[]; unexpected=[]; position failures=[]",
+      "inferenceMs": 1836,
+      "apiRoundTripMs": 1863,
+      "engine": "GEMINI/gemini-3.1-flash-lite",
+      "initialOutcome": "PASS"
+    },
+    {
+      "id": "012",
+      "path": ".local/vision/cases/012.jpg",
+      "required": [
+        "eggplant",
+        "tomato",
+        "banana"
+      ],
+      "description": "three photographic tiles at separate positions",
+      "split": "development",
+      "regions": {
+        "eggplant": [
+          0.013888888888888888,
+          0.010416666666666666,
+          0.3472222222222222,
+          0.34375
+        ],
+        "tomato": [
+          0.027777777777777776,
+          0.6458333333333334,
+          0.3236111111111111,
+          0.9791666666666666
+        ],
+        "banana": [
+          0.5138888888888888,
+          0.3229166666666667,
+          0.9583333333333334,
+          0.65625
+        ]
+      },
+      "outcome": "PASS",
+      "observed": "labels=['Eggplant', 'Tomato', 'Banana']; missing=[]; unexpected=[]; position failures=[]",
+      "inferenceMs": 2337,
+      "apiRoundTripMs": 2366,
+      "engine": "GEMINI/gemini-3.1-flash-lite",
+      "initialOutcome": "PASS"
+    },
+    {
+      "id": "013",
+      "path": ".local/vision/cases/013.jpg",
+      "required": [
+        "eggplant"
+      ],
+      "description": "held-out source photo; different placement and angle",
+      "split": "held-out",
+      "regions": {},
+      "outcome": "PASS",
+      "observed": "labels=['Eggplant']; missing=[]; unexpected=[]; position failures=[]",
+      "inferenceMs": 1835,
+      "apiRoundTripMs": 1862,
+      "engine": "GEMINI/gemini-3.1-flash-lite",
+      "initialOutcome": "PASS"
+    },
+    {
+      "id": "014",
+      "path": ".local/vision/cases/014.jpg",
+      "required": [
+        "egg"
+      ],
+      "description": "held-out legitimate white shell eggs",
+      "split": "held-out",
+      "regions": {},
+      "outcome": "PASS",
+      "observed": "labels=['Egg', 'Egg', 'Egg', 'Egg', 'Egg', 'Egg', 'Egg', 'Egg', 'Egg', 'Egg', 'Egg', 'Egg', 'Egg', 'Egg', 'Egg', 'Egg', 'Egg', 'Egg']; missing=[]; unexpected=[]; position failures=[]",
+      "inferenceMs": 4582,
+      "apiRoundTripMs": 4641,
+      "engine": "GEMINI/gemini-3.1-flash-lite",
+      "initialOutcome": "PASS"
+    },
+    {
+      "id": "015",
+      "path": ".local/vision/cases/015.jpg",
+      "required": [
+        "eggplant"
+      ],
+      "description": "same image repeated; results are observations, not additions",
+      "split": "regression",
+      "regions": {},
+      "outcome": "PASS",
+      "observed": "labels=['Eggplant']; missing=[]; unexpected=[]; position failures=[]",
+      "inferenceMs": 1267,
+      "apiRoundTripMs": 1334,
+      "engine": "GEMINI/gemini-3.1-flash-lite",
+      "initialOutcome": "PASS"
+    }
+  ],
+  "sources": [
+    {
+      "id": "a",
+      "url": "https://images.unsplash.com/photo-1615484477201-9f4953340fab?w=900&q=85",
+      "sha256": "866d3f8d2d03fa9838696bb404d921eb3241567cd49d58a3583635e1a54dd841"
+    },
+    {
+      "id": "b",
+      "url": "https://images.unsplash.com/photo-1528826007177-f38517ce9a8a?w=900&q=85",
+      "sha256": "981057fd19f8a42a964ff99913ffe13650e3389c4693c29628f6a4f04f2da0e3"
+    },
+    {
+      "id": "c",
+      "url": "https://images.unsplash.com/photo-1669754839259-04d3abecfee6?w=1000&q=85",
+      "sha256": "414b0e84b35685e12a44236934094aecb891d4c8b09c836801c8d6349bcd36c3"
+    },
+    {
+      "id": "d",
+      "url": "https://raw.githubusercontent.com/ultralytics/assets/main/im/zidane.jpg",
+      "sha256": "16d73869e3267a7d4ed00de8e860833bd1657c1b252e94c0c348277adc7b6edb"
+    },
+    {
+      "id": "e",
+      "url": "https://images.unsplash.com/photo-1546094096-0df4bcaaa337?w=900&q=85",
+      "sha256": "5ed0839b98a2bb5833ed7fdb0f40d03b4ba0163372bc380968f6d0416f790556"
+    },
+    {
+      "id": "f",
+      "url": "https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?w=900&q=85",
+      "sha256": "daa1a9e29a8a0380e5dd15a780314f9ac6d045377734d4f949103722b6011b1a"
+    },
+    {
+      "id": "g",
+      "url": "https://cdn.esupply.co.jp/images/goods/M/MA-122HW_1.jpg",
+      "sha256": "74619a1c7cf7307671f2d571075a1e0ab9115a20217bdab705fad7475e20e0de"
+    },
+    {
+      "id": "h",
+      "url": "https://images.unsplash.com/photo-1589928183476-89aa0fdd30d0?w=900&q=85",
+      "sha256": "2607937a63155f31156bff22c0e143e8a6846516b424605a79869d4da1652f2a"
+    }
+  ],
+  "apiCheck": {
+    "checks": [
+      {
+        "attempt": 1,
+        "status": "SUCCESS",
+        "engine": "GEMINI/gemini-3.1-flash-lite",
+        "frameId": 501,
+        "labels": [
+          "Eggplant",
+          "Tomato",
+          "Banana"
+        ],
+        "roundTripMs": 2277,
+        "inferenceMs": 2201,
+        "sourceAgeMs": 2248
+      },
+      {
+        "attempt": 2,
+        "status": "SUCCESS",
+        "engine": "GEMINI/gemini-3.1-flash-lite",
+        "frameId": 501,
+        "labels": [
+          "Eggplant",
+          "Tomato",
+          "Banana"
+        ],
+        "roundTripMs": 10,
+        "inferenceMs": 2201,
+        "sourceAgeMs": 2259
+      }
+    ],
+    "health": {
+      "status": "configured",
+      "engine": "GEMINI",
+      "model": "gemini-3.1-flash-lite",
+      "inferenceVerified": true,
+      "successfulRequests": 1,
+      "scope": "loopback validation API"
+    }
+  }
+}

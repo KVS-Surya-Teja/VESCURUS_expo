@@ -3,6 +3,10 @@ package com.example.vescurus.debug
 import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
+import com.example.vescurus.BuildConfig
+import com.example.vescurus.model.Observation
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -12,13 +16,24 @@ object VescurusLogger {
     private const val TAG = "VescurusLogger"
     private var sessionDir: File? = null
     private var sequence = 0
+    private var evidenceDir: File? = null
 
     fun initSession(context: Context) {
+        evidenceDir=File(context.cacheDir,"vision-evidence").apply { mkdirs() }
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val baseDir = context.getExternalFilesDir("debug")
         sessionDir = File(baseDir, "session_$timestamp").apply { mkdirs() }
         sequence = 0
         Log.d(TAG, "New debug session started at: ${sessionDir?.absolutePath}")
+    }
+
+    @Synchronized fun retainObservation(observation: Observation) {
+        if(!BuildConfig.DEBUG)return
+        val dir=evidenceDir ?: return
+        try {
+            File(dir,"${observation.streamId.take(8)}-${observation.frameId}.json").writeText(Json.encodeToString(observation))
+            dir.listFiles()?.filter { it.extension=="json" }?.sortedByDescending { it.lastModified() }?.drop(12)?.forEach { it.delete() }
+        } catch(_: Exception) { Log.w(TAG,"Could not retain debug frame evidence") }
     }
 
     fun logInference(rawBitmap: Bitmap, cloudBitmap: Bitmap, jsonResponse: String) {

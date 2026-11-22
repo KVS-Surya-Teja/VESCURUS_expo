@@ -8,8 +8,8 @@ data class CookHistoryItem(
     val recipeId: String,
     val recipeName: String,
     val timestamp: Long,
-    val calories: Int,
-    val proteinG: Float,
-    val carbsG: Float,
-    val fatsG: Float
+    val calories: Int?,
+    val proteinG: Float?,
+    val carbsG: Float?,
+    val fatsG: Float?
 )

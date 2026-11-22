@@ -1,0 +1,23 @@
+{
+  "detections": [
+    {
+      "label": "eggplant",
+      "confidence": 0.998,
+      "box_2d": [51, 59, 260, 309],
+      "is_supported": true
+    },
+    {
+      "label": "tomato",
+      "confidence": 0.999,
+      "box_2d": [131, 707, 269, 923],
+      "is_supported": true
+    },
+    {
+      "label": "banana",
+      "confidence": 0.999,
+      "box_2d": [644, 370, 876, 589],
+      "is_supported": true
+    }
+  ],
+  "overall_confidence": 0.999
+}

@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -61,8 +63,10 @@ enum class Screen {
 
 @Composable
 fun VESCURUSApp() {
-    var currentScreen by remember { mutableStateOf(Screen.Splash) }
-    var selectedRole by remember { mutableStateOf(Role.NONE) }
+    val context=LocalContext.current
+    val prefs=remember { context.getSharedPreferences("vescurus",0) }
+    var selectedRole by rememberSaveable { mutableStateOf(runCatching { Role.valueOf(prefs.getString("role","NONE")!!) }.getOrDefault(Role.NONE)) }
+    var currentScreen by rememberSaveable { mutableStateOf(if(selectedRole==Role.NONE) Screen.Splash else Screen.MainApp) }
 
     Crossfade(
         targetState = currentScreen,
@@ -74,12 +78,14 @@ fun VESCURUSApp() {
                 currentScreen = if (selectedRole == Role.NONE) Screen.RoleSelection else Screen.MainApp 
             })
             Screen.RoleSelection -> RoleSelectionScreen(onRoleSelected = { role ->
+                prefs.edit().putString("role",role.name).apply()
                 selectedRole = role
                 currentScreen = Screen.MainApp
             })
             Screen.MainApp -> MainAppShell(
                 selectedRole = selectedRole,
                 onResetRole = {
+                    prefs.edit().putString("role","NONE").apply()
                     selectedRole = Role.NONE
                     currentScreen = Screen.RoleSelection
                 }
@@ -151,7 +157,7 @@ fun SplashScreen(onTimeout: () -> Unit) {
             Spacer(modifier = Modifier.height(6.dp))
 
             Text(
-                text = "EDGE AI SMART COOKING",
+                text = "PREPARE / COOK / REMEMBER",
                 color = Color.White.copy(alpha = 0.7f),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,

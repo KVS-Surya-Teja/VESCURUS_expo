@@ -1,0 +1,43 @@
+{
+  "type": "OBJECT",
+  "properties": {
+    "detections": {
+      "type": "ARRAY",
+      "items": {
+        "type": "OBJECT",
+        "properties": {
+          "label": {
+            "type": "STRING"
+          },
+          "confidence": {
+            "type": "NUMBER"
+          },
+          "box_2d": {
+            "type": "ARRAY",
+            "items": {
+              "type": "INTEGER"
+            },
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "is_supported": {
+            "type": "BOOLEAN"
+          }
+        },
+        "required": [
+          "label",
+          "confidence",
+          "box_2d",
+          "is_supported"
+        ]
+      }
+    },
+    "overall_confidence": {
+      "type": "NUMBER"
+    }
+  },
+  "required": [
+    "detections",
+    "overall_confidence"
+  ]
+}

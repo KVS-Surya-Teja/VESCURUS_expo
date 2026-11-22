@@ -76,12 +76,7 @@ class YoloRepositoryImpl(
             response
         } catch (e: Exception) {
             Log.e(tag, "YOLO-World Server connection failed: ${e.message}")
-            // Return empty response on network or server error so the UI handles it gracefully
-            AnalysisResponse(
-                request_id = "yolo-error",
-                detections = emptyList(),
-                overall_confidence = 0f
-            )
+            throw e
         }
     }
 }

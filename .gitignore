@@ -13,3 +13,8 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Local CV validation images/results and optional Python environment
+.local/
+.venv/
+__pycache__/

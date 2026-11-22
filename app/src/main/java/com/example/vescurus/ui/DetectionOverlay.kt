@@ -21,41 +21,18 @@ import com.example.vescurus.model.DetectionResult
 
 @OptIn(ExperimentalTextApi::class)
 @Composable
-fun DetectionOverlay(detections: List<DetectionResult>) {
+fun DetectionOverlay(detections: List<DetectionResult>, imageWidth: Int = 3, imageHeight: Int = 4, fitImage: Boolean = false) {
     val textMeasurer = rememberTextMeasurer()
 
     Canvas(modifier = Modifier.fillMaxSize()) {
         val screenW = size.width
         val screenH = size.height
 
-        /*
-         * Gemini returns [ymin, xmin, ymax, xmax] relative to the image it
-         * receives. GuideScreen sends an upright portrait bitmap to Gemini.
-         * PreviewView displays the camera with its own aspect-ratio transform.
-         * This projection compensates for the horizontal FILL_CENTER crop
-         * used by the current portrait preview.
-         */
-        val sourceAspect = 3f / 4f // width / height of portrait source
-        val screenAspect = screenW / screenH
-
-        val displayedWidth: Float
-        val displayedHeight: Float
-        val horizontalCrop: Float
-        val verticalCrop: Float
-
-        if (screenAspect <= sourceAspect) {
-            // View is narrower than source: height fits exactly, horizontal sides are cropped
-            displayedHeight = screenH
-            displayedWidth = screenH * sourceAspect
-            horizontalCrop = ((displayedWidth - screenW) / 2f).coerceAtLeast(0f)
-            verticalCrop = 0f
-        } else {
-            // View is wider than source: width fits exactly, vertical top/bottom are cropped
-            displayedWidth = screenW
-            displayedHeight = screenW / sourceAspect
-            horizontalCrop = 0f
-            verticalCrop = ((displayedHeight - screenH) / 2f).coerceAtLeast(0f)
-        }
+        val projection=com.example.vescurus.model.imageProjection(imageWidth,imageHeight,screenW,screenH,fitImage)
+        val displayedWidth=projection.width
+        val displayedHeight=projection.height
+        val horizontalCrop=-projection.offsetX
+        val verticalCrop=-projection.offsetY
 
         detections.forEach { detection ->
             val box = detection.box_2d

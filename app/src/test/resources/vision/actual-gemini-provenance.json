@@ -1,0 +1,12 @@
+{
+  "requestId": "9921ba89-15c0-4de3-b04e-d642829a46dd",
+  "sessionId": "final-api-check",
+  "streamId": "held-out-api",
+  "frameId": 501,
+  "model": "gemini-3.1-flash-lite",
+  "width": 640,
+  "height": 480,
+  "imageSha256": "c529f18b8d50081f6988ca35811dfc44571e39141c708e9b1f91494d5c8eddd6",
+  "promptSha256": "c732d041256c9f8a562749c8253a30a853efc8199c8a6fa639a08cebe7b8fae5",
+  "inferenceMs": 2201
+}

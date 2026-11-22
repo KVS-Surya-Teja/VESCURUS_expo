@@ -2,7 +2,10 @@ package com.example.vescurus.model
 
 import androidx.annotation.DrawableRes
 import com.example.vescurus.R
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
+@Serializable
 data class RecipeStep(
     val startTimeMs: Long,
     val endTimeMs: Long,
@@ -10,19 +13,25 @@ data class RecipeStep(
     val ttsPrompt: String? = null
 )
 
+@Serializable
 data class Recipe(
     val id: String,
     val categoryClass: Int = 0,
     val name: String,
     val description: String,
-    @DrawableRes val thumbnail: Int = R.drawable.scrambled_eggs,
+    @Transient @DrawableRes val thumbnail: Int = R.drawable.ic_vescurus_logo,
     val thumbnailUrl: String? = null,
     val totalTimeMs: Long,
     val steps: List<RecipeStep>,
-    val calories: Int,
-    val proteinG: Float,
-    val carbsG: Float,
-    val fatsG: Float
+    val calories: Int? = null,
+    val proteinG: Float? = null,
+    val carbsG: Float? = null,
+    val fatsG: Float? = null,
+    val source: String = "VESCURUS built-in guide",
+    val sourceUrl: String? = null,
+    val servings: Int? = null,
+    val targets: List<RecipeTarget> = emptyList(),
+    val savedAt: Long? = null
 )
 
 val EGG_RECIPES = listOf(

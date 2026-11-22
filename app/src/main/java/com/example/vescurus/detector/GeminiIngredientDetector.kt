@@ -44,8 +44,10 @@ class GeminiIngredientDetector : IngredientDetector {
                     "CV_FLOW",
                     "Gemini detection failure: ${result.message}"
                 )
-                emptyList()
+                throw InferenceFailure(result.status, result.message)
             }
         }
     }
 }
+
+class InferenceFailure(val status: String, message: String) : Exception(message)
