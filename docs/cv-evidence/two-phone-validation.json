@@ -274,13 +274,135 @@
     }
   },
   "latestSoftwareBuild": {
-    "apkSha256": "9a37e98feb4f3641947cfaa521a786510ac6d248c34e95f7d9dd5ece1f069c07",
+    "apkSha256": "2b08a41b4b1de78e5f70f836d8f7756d420611dff615893e392b5affcdba3b7e",
     "installedOnPhones": false,
     "reason": "User intentionally disconnected both phones before the final UI and request-ownership changes.",
-    "jvmTests": 49,
+    "jvmTests": 53,
     "pythonTests": 21,
     "androidTestsLastPhysicalPass": 7,
     "figmaDesign": "https://www.figma.com/design/Zcx3aNpssrtaWoefR8OLJJ",
-    "hardwareScaleAvailable": false
+    "hardwareScaleAvailable": false,
+    "ciUrl": "https://github.com/KVS-Surya-Teja/VESCURUS_expo/actions/runs/45034882959",
+    "verifiedAppRevision": "b9fb8844c2bf9559783bdb0aec91dc4931959e5a",
+    "androidEmulatorPassed": 8,
+    "androidEmulatorSkipped": 1,
+    "ciArtifactSha256": "fb55dbc01d1a67c4f6df4cee1ee7b737bedf00fce11ce6cdb8ce12fe4716fe8f",
+    "textEndpointFinalHealth": {
+      "httpStatus": 200,
+      "reply": "Ready.",
+      "note": "Endpoint health only; newest on-phone planning not yet verified."
+    },
+    "currentPromptApiReplay": {
+      "sessionId": "api-replay-check",
+      "streamId": "43dc82a6-4910-487f-871b-acba6bf12202",
+      "frameId": 1,
+      "captureUptimeMs": 348813882,
+      "width": 480,
+      "height": 640,
+      "engine": "GEMINI/gemini-3.1-flash-lite",
+      "status": "SUCCESS",
+      "inferenceMs": 3382,
+      "sourceAgeMs": 3518,
+      "detections": [
+        {
+          "label": "Apple",
+          "confidence": 0.985,
+          "supported": true,
+          "box_2d": {
+            "top": 0.41,
+            "left": 0.262,
+            "bottom": 0.615,
+            "right": 0.427
+          },
+          "preparation": "sliced"
+        },
+        {
+          "label": "Apple",
+          "confidence": 0.972,
+          "supported": true,
+          "box_2d": {
+            "top": 0.433,
+            "left": 0.381,
+            "bottom": 0.59,
+            "right": 0.558
+          },
+          "preparation": "sliced"
+        },
+        {
+          "label": "Apple",
+          "confidence": 0.965,
+          "supported": true,
+          "box_2d": {
+            "top": 0.365,
+            "left": 0.519,
+            "bottom": 0.602,
+            "right": 0.754
+          },
+          "preparation": "sliced"
+        },
+        {
+          "label": "Mandarin Orange",
+          "confidence": 0.992,
+          "supported": true,
+          "box_2d": {
+            "top": 0.312,
+            "left": 0.433,
+            "bottom": 0.45,
+            "right": 0.588
+          },
+          "preparation": "peeled"
+        },
+        {
+          "label": "Mandarin Orange",
+          "confidence": 0.988,
+          "supported": true,
+          "box_2d": {
+            "top": 0.583,
+            "left": 0.383,
+            "bottom": 0.683,
+            "right": 0.627
+          },
+          "preparation": "peeled"
+        },
+        {
+          "label": "Mandarin Orange",
+          "confidence": 0.985,
+          "supported": true,
+          "box_2d": {
+            "top": 0.621,
+            "left": 0.354,
+            "bottom": 0.723,
+            "right": 0.517
+          },
+          "preparation": "peeled"
+        },
+        {
+          "label": "Mandarin Orange",
+          "confidence": 0.978,
+          "supported": true,
+          "box_2d": {
+            "top": 0.565,
+            "left": 0.619,
+            "bottom": 0.665,
+            "right": 0.815
+          },
+          "preparation": "peeled"
+        }
+      ],
+      "rotationApplied": 0,
+      "mirrored": false,
+      "coordinates": "normalized-yxyx-upright",
+      "verificationNote": "Blind replay of an earlier real camera JPEG through current prompt/schema/API, not a new physical scene. No expected identities supplied."
+    },
+    "structuredRecipeSmoke": {
+      "httpStatus": 200,
+      "latencyMs": 2210,
+      "note": "Direct API check using full production prompt and declared response schema. Four-step recipe preserved unknown Apple Slices quantity and explicit optional pantry additions. Not an on-phone exchange or cooked meal. Earlier unschematized JSON request returned503."
+    },
+    "contextualChatApiCheck": {
+      "httpStatus": 200,
+      "latencyMs": 2820,
+      "note": "Same configured model, bounded1024-token response. Recalled Apple Slices with unknown quantity; asked a contextual clarification. Not a new physical-phone check."
+    }
   }
 }

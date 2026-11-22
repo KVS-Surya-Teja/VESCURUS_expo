@@ -61,10 +61,17 @@ correction history. It omits API keys and camera image data.
 
 Chat and structured recipe planning use bounded header-authenticated REST with a
 45-second request bound and one retry for temporary 502/503/504 errors. They retain
-existing ingredients/recipe on failure. A real text-service check returned 503 and
-a later timeout; a listed older candidate returned 404 and a newer Flash
-candidate timed out. No model substitution was made. Successful planning is not
-yet claimed for those checks; cloud service availability is a demonstration risk.
+existing ingredients/recipe on failure. Earlier text/JSON calls returned 503 or
+occasionally timed out. The same configured model subsequently passed a real
+contextual chat request (HTTP 200, 2.82 s) and a complete production recipe-prompt
+request with declared JSON schema (HTTP 200, 2.21 s). The latter kept Apple Slices'
+quantity unknown and returned four steps with explicit optional pantry additions.
+The production parser rejects malformed/bounded-invalid output, preserves confirmed
+quantities and combined batches, accepts clarification questions, and does not
+accept generated source URLs or nutrition. Four JVM cases cover this contract.
+The prompt also distinguishes no added sugar from sugar-free. These are direct
+API checks, not a new on-phone recipe exchange or a cooked meal. Provider
+availability remains intermittent; the latest on-phone planning check is pending.
 
 Cloud vision: explicit Gemini `gemini-3.1-flash-lite` REST requests with shared prompt
 and strict schema. Spoonacular uses the existing key in an HTTP header, explicit
@@ -228,7 +235,7 @@ in the final verification below; the engine change is not itself proof of succes
 
 ### Final verification gate
 
-Latest local debug APK available for later installation: `9a37e98feb4f3641947cfaa521a786510ac6d248c34e95f7d9dd5ece1f069c07`.
+Latest local debug APK available for later installation: `2b08a41b4b1de78e5f70f836d8f7756d420611dff615893e392b5affcdba3b7e`.
 
 Last physically installed debug APK SHA-256 (both devices, before disconnection):
 `bef216dd77a0078a57f71de5e6adc7ad7d2121d948afb17f82b3e96fd7d4e0b2`.
@@ -236,7 +243,7 @@ Redmi `aibyojwcfyemdmce` and Samsung `RZ8M906DQ3K` were independently checked
 against the local APK; data was preserved. Natural voice provider is additionally
 installed on Samsung. Physical camera/control checks used these two devices.
 
-The final build completed application/test APKs, **49 JVM tests with no failures**,
+The final build completed application/test APKs, **53 JVM tests with no failures**,
 and lint with **0 errors** (warnings/hints remain). **21 Python API tests**
 also passed, covering preparation and request-correlation parity. The earlier lint internal FIR
 analysis failure did not recur on the successful gate. Seven Android tests passed on Samsung (61.64 seconds), including non-skipped
@@ -246,17 +253,32 @@ The preparation-only revision/audit correction, later UI refinement and recipe-j
 ownership fixes were added afterward. The user intentionally disconnected both
 phones; the newest APK needs later physical installation/recheck. Two additional
 Android regression cases cover late recipe replies and starting cooking while a
-planner is pending. The final GitHub emulator gate checks all nine Android cases;
-the optional physical voice test is expected to skip without its installed model.
+planner is pending. The [successful GitHub gate](https://github.com/KVS-Surya-Teja/VESCURUS_expo/actions/runs/45034882959)
+verified application revision `b9fb8844c2bf9559783bdb0aec91dc4931959e5a`: **53 JVM
+tests; 8 Android tests passed, 1 optional installed-voice test skipped** on API 35;
+app/test APK builds and lint completed with 0 errors. The real voice generation
+pass belongs to Samsung, not that emulator skip. The downloaded CI artifact was
+verified against SHA-256 `fb55dbc01d1a67c4f6df4cee1ee7b737bedf00fce11ce6cdb8ce12fe4716fe8f`.
 
-Native review images: [Cook controls](ui-review/physical-cook-controls.png),
+Latest native CI screens, using real Compose components and isolated fixtures:
+[Cook](ui-review/cook-current-ci.png),
+[cooking step](ui-review/cooking-step-current-ci.png),
+[journal fixture](ui-review/journal-current-ci.png),
+[recipe-ready fixture](ui-review/recipe-ready-current-ci.png).
+These are emulator checks, not new physical-phone verification. The Cook layout
+fixture renders CookScreen directly without shell navigation; journal/cooking
+fixtures deliberately use isolated legacy test storage and do not expose a Demo
+role in the application. The layout/render review found the expected camera,
+composer, title editing and collapsed bookkeeping without overlapping controls.
+
+Earlier physical review images: [Cook controls](ui-review/physical-cook-controls.png),
 [keyboard](ui-review/physical-cook-keyboard.png),
 [journal fixture](ui-review/physical-journal-fixture.png). The journal image is an
 isolated automated fixture on Samsung, **not real cooking or measured intake**;
 its Practice label belongs to retained test support, not an exposed Demo role.
 Actual main-role screenshots contain no Demo controls.
 
- isolated test fixtures are never
+Isolated test fixtures are never
 represented as a physically cooked meal or a real scale measurement.
 
 ### Scale: reported wiring and pending work
