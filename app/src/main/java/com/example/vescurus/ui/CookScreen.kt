@@ -355,7 +355,7 @@ fun CookScreen(
                             item("storage") { StorageNotice(notice, viewModel::retrySave) }
                         }
                         if (session.completedAt == null &&
-                            viewModel.cookingState != CookingState.COOKING &&
+                            viewModel.cookingState !in setOf(CookingState.COOKING, CookingState.DONE) &&
                             (recipe == null || ingredientFlowActive)) {
                             item("welcome") {
                                 IngredientRecognitionCard(

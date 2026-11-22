@@ -75,6 +75,12 @@ class ExhibitionFlowTest {
         compose.onNodeWithTag("next-ingredient").assertIsDisplayed()
         compose.onNodeWithTag("cook-scroll").performScrollToNode(hasTestTag("find-recipes"))
         compose.onNodeWithTag("find-recipes").assertIsDisplayed()
+        compose.runOnIdle {
+            val steps=vm.selectedRecipe!!.steps.size
+            vm.startCooking()
+            repeat(steps) { vm.completeStep() }
+        }
+        compose.onNodeWithTag("find-recipes").assertDoesNotExist()
     }
     private fun reviewShell(command: String) {
         val automation=InstrumentationRegistry.getInstrumentation().uiAutomation
