@@ -1,7 +1,7 @@
 package com.example.vescurus
 
 import android.app.Application
-import android.graphics.Bitmap
+import android.os.ParcelFileDescriptor
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.unit.dp
@@ -23,13 +23,15 @@ import java.io.File
 class ExhibitionFlowTest {
     @get:Rule val compose=createComposeRule()
     private fun captureReview(name: String) {
+        if(InstrumentationRegistry.getArguments().getString("uiReview")!="true")return
         compose.waitForIdle()
         val instrumentation=InstrumentationRegistry.getInstrumentation()
-        val bitmap=instrumentation.uiAutomation.takeScreenshot() ?: return
-        val context=instrumentation.targetContext
-        val directory=File(context.getExternalFilesDir(null) ?: context.filesDir,"ui-review").apply { mkdirs() }
-        File(directory,"$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG,100,it) }
-        bitmap.recycle()
+        require(name.matches(Regex("[a-z-]+")))
+        // Connected tests can uninstall the app before the workflow collects artifacts.
+        // The CI-only shell capture survives that cleanup and contains isolated UI fixtures.
+        listOf("mkdir -p /sdcard/Download/vescurus-ui", "screencap -p /sdcard/Download/vescurus-ui/$name.png").forEach { command ->
+            ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand(command)).use { it.readBytes() }
+        }
     }
     @Test fun nonEggSessionCompletesAndSurvivesPhoneStorageReload() {
         val app=InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as Application
