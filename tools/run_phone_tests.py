@@ -1,14 +1,16 @@
 """Run VESCURUS tests on an unlocked physical phone without erasing user data."""
 import argparse,re,subprocess,threading
 from pathlib import Path
-p=argparse.ArgumentParser();p.add_argument('--device',required=True);args=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--device',required=True);p.add_argument('--ui-review',action='store_true');args=p.parse_args()
 base=['adb','-s',args.device]
+miui=bool(subprocess.check_output(base+['shell','getprop','ro.miui.ui.version.name']).strip())
 subprocess.run(base+['shell','input','keyevent','KEYCODE_WAKEUP'],check=True)
 trust=subprocess.check_output(base+['shell','dumpsys','trust'],text=True,encoding='utf8',errors='replace')
 current=re.search(r'User .*?\(current\):(.*?)(?=\n\s*User |\Z)',trust,re.S)
 if current and 'deviceLocked=1' in current.group(1):
  raise SystemExit('Unlock the phone before running UI instrumentation; no tests were started.')
-process=subprocess.Popen(base+['shell','am','instrument','-w','-r','com.example.vescurus.test/androidx.test.runner.AndroidJUnitRunner'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,encoding='utf8',errors='replace')
+review_args=['-e','uiReview','true'] if args.ui_review else []
+process=subprocess.Popen(base+['shell','am','instrument','-w','-r']+review_args+['com.example.vescurus.test/androidx.test.runner.AndroidJUnitRunner'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,encoding='utf8',errors='replace')
 lines=[];bundle={};active_test=None;pending=None;generation=0
 foreground_lock=threading.Lock()
 
@@ -29,7 +31,7 @@ def change_test(test_key,expected=None):
   generation+=1
   if pending is not None:pending.cancel()
   pending=None;active_test=test_key
-  if test_key is not None and 'ExhibitionFlowTest' in test_key[0]:
+  if miui and test_key is not None and 'ExhibitionFlowTest' in test_key[0]:
    pending=threading.Timer(1.5,foreground,args=(generation,test_key))
    pending.daemon=True
    pending.start()

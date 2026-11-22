@@ -35,7 +35,8 @@ class GeminiIngredientDetector : IngredientDetector {
                             det.box_2d.ymax,
                             det.box_2d.xmax
                         ),
-                        supported = det.is_supported
+                        supported = det.is_supported,
+                        preparation = det.preparation
                     )
                 }
             }

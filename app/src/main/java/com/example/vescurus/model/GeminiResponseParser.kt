@@ -7,6 +7,7 @@ import kotlinx.serialization.json.*
 
 object GeminiResponseParser {
     private val json = Json { ignoreUnknownKeys = true }
+    private val preparations = setOf("raw", "whole", "peeled", "sliced", "diced", "julienne", "brunoise", "chopped", "grated", "mashed", "fried")
     fun parse(text: String): AnalysisResponse = try { parseChecked(text) }
     catch (e: RuntimeException) { throw IllegalArgumentException("Malformed Gemini response", e) }
 
@@ -26,7 +27,9 @@ object GeminiResponseParser {
             require(b.size == 4 && b.all { it.isFinite() && it in 0f..1000f })
             require(b[2] > b[0] && b[3] > b[1])
             val supported = o.getValue("is_supported").jsonPrimitive.boolean
-            IngredientDetection("food-$index", label, confidence, BoundingBox(b[0]/1000, b[1]/1000, b[2]/1000, b[3]/1000), is_supported = supported)
+            val preparation = (o["preparation"] as? JsonPrimitive)?.takeIf { it.isString }
+                ?.content?.trim()?.lowercase(java.util.Locale.ROOT)?.takeIf { it.length <= 24 && it in preparations && supported }
+            IngredientDetection("food-$index", label, confidence, BoundingBox(b[0]/1000, b[1]/1000, b[2]/1000, b[3]/1000), is_supported = supported, preparation = preparation)
         }
         return AnalysisResponse("gemini-frame", detections, overall)
     }

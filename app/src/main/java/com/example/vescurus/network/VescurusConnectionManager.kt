@@ -16,7 +16,7 @@ import io.ktor.client.plugins.websocket.*
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.engine.*
-import io.ktor.server.netty.*
+import io.ktor.server.cio.CIO as ServerCIO
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
@@ -74,12 +74,21 @@ class VescurusConnectionManager : ViewModel() {
     val cameraFresh: StateFlow<Boolean> = _cameraFresh
     private val _visionStatus=MutableStateFlow("Waiting for an analyzed frame")
     val visionStatus: StateFlow<String> = _visionStatus
+    private val _analysisRequest=MutableStateFlow(0L)
+    val analysisRequest: StateFlow<Long> = _analysisRequest
+    private val _analysisRequestId=MutableStateFlow<String?>(null)
+    val analysisRequestId: StateFlow<String?> = _analysisRequestId
+    private var pendingAnalysisId: String?=null
+    private val _finishedPhoto=MutableStateFlow<VideoFrame?>(null)
+    val finishedPhoto: StateFlow<VideoFrame?> = _finishedPhoto
+    private var requestedPhotoSession: String?=null
+    private var guidePhotoSession: String?=null
     private var observationReceived=0L
     private var frameReceived=0L
     private var gate=ObservationGate()
     private var videoGate=ObservationGate(3000)
     private var lastStream: String?=null
-    private var server: NettyApplicationEngine?=null
+    private var server: ApplicationEngine?=null
     private var client: HttpClient?=null
     private var activeClientSession: DefaultClientWebSocketSession?=null
     private var nsdManager: NsdManager?=null
@@ -94,6 +103,7 @@ class VescurusConnectionManager : ViewModel() {
         val observations=Channel<Observation>(Channel.CONFLATED)
         val video=Channel<VideoFrame>(Channel.CONFLATED)
         var paired=false
+        val analysisRequests=linkedSetOf<String>()
         fun closeQueues() { observations.close();video.close() }
     }
     @Volatile private var peer: GuidePeer?=null
@@ -134,13 +144,14 @@ class VescurusConnectionManager : ViewModel() {
         _sessionContext.value=null;currentRole=Role.NONE;_status.value=ConnectionStatus.IDLE;_diagnostics.value=""
     }
     private fun clearObservations() {
+        requestedPhotoSession=null;guidePhotoSession=null;_finishedPhoto.value=null;pendingAnalysisId=null;_analysisRequestId.value=null
         _latestFrame.value=null;_latestDetections.value=emptyList();_observation.value=null
         _cameraFresh.value=false;lastStream=null;_visionStatus.value="Waiting for an analyzed frame"
     }
     private fun validContext(c: SessionContext)=c.sessionId.length in 1..128 && c.version>=0 && c.step in 0..500 && c.ingredients.size<=100 && c.ingredients.all { it.length<=80 } && (c.recipe?.length ?: 0)<=300
     private fun startServer() {
         val port=8766;val ip=getLocalIpAddress()
-        server=embeddedServer(Netty,host="0.0.0.0",port=port) {
+        server=embeddedServer(ServerCIO,host="0.0.0.0",port=port) {
             install(io.ktor.server.websocket.WebSockets) { pingPeriod=java.time.Duration.ofSeconds(5);timeout=java.time.Duration.ofSeconds(15);maxFrameSize=3_000_000 }
             routing {
                 get("/health") { call.respondText("{\"service\":\"VESCURUS Guide\",\"protocol\":2}",ContentType.Application.Json) }
@@ -186,6 +197,18 @@ class VescurusConnectionManager : ViewModel() {
                                 if(previous?.sessionId!=c.sessionId)clearObservations()
                                 _sessionContext.value=c;send("SYNC|"+json.encodeToString(c))
                                 _diagnostics.value="Cook synchronized | ${c.sessionId.take(8)} v${c.version} | $ip:$port"
+                            } else if(text.startsWith("FINISH_PHOTO|")) {
+                                val id=text.substringAfter('|')
+                                if(peer===owned && id==_sessionContext.value?.sessionId)guidePhotoSession=id
+                            } else if(text.startsWith("ANALYZE|")) {
+                                val parts=text.split('|')
+                                if(parts.size==3 && parts[1]==_sessionContext.value?.sessionId &&
+                                    parts[2].length in 1..80 && parts[2] !in owned.analysisRequests && peer===owned) {
+                                    owned.analysisRequests.add(parts[2])
+                                    if(owned.analysisRequests.size>128)owned.analysisRequests.remove(owned.analysisRequests.first())
+                                    _analysisRequestId.value=parts[2]
+                                    _analysisRequest.value++
+                                }
                             } else if(text.startsWith("SNAPSHOT|"))send("SNAPSHOT_UNAVAILABLE|"+text.removePrefix("SNAPSHOT|"))
                         }
                     } catch(e: CancellationException) { throw e
@@ -301,9 +324,15 @@ class VescurusConnectionManager : ViewModel() {
                                     if(c==_sessionContext.value) { _status.value=ConnectionStatus.CONNECTED;_diagnostics.value="Session synchronized | ${c.sessionId.take(8)} v${c.version}" }
                                     else _sessionContext.value?.let { contextQueue.trySend(it) }
                                 }
+                                text.startsWith("FINISHED_PHOTO|") && paired -> {
+                                    val photo=json.decodeFromString<VideoFrame>(text.substringAfter('|'))
+                                    if(photo.valid() && photo.sourceAgeMs<3000 && photo.sessionId==requestedPhotoSession && photo.sessionId==_sessionContext.value?.sessionId) {
+                                        _finishedPhoto.value=photo;requestedPhotoSession=null
+                                    }
+                                }
                                 text.startsWith("OBS|") && paired -> {
                                     val o=json.decodeFromString<Observation>(text.removePrefix("OBS|"));val id=_sessionContext.value?.sessionId ?: continue
-                                    if(_status.value==ConnectionStatus.CONNECTED && (!_cameraFresh.value || lastStream==o.streamId) && gate.accept(o,id))publish(o)
+                                    if(_status.value==ConnectionStatus.CONNECTED && (pendingAnalysisId==null || o.requestId==pendingAnalysisId) && (!_cameraFresh.value || lastStream==o.streamId) && gate.accept(o,id)) { pendingAnalysisId=null;publish(o) }
                                 }
                                 text.startsWith("VIDEO|") && paired -> {
                                     val v=json.decodeFromString<VideoFrame>(text.removePrefix("VIDEO|"));val id=_sessionContext.value?.sessionId ?: continue
@@ -346,11 +375,33 @@ class VescurusConnectionManager : ViewModel() {
     fun broadcastVideo(v: VideoFrame) {
         if(currentRole!=Role.GUIDE)return
         frameReceived=SystemClock.elapsedRealtime();_cameraFresh.value=true
+        if(guidePhotoSession==v.sessionId && v.valid()) {
+            guidePhotoSession=null
+            val target=peer
+            viewModelScope.launch {
+                if(target!=null && peer===target && target.paired)runCatching {
+                    target.session.send("FINISHED_PHOTO|"+json.encodeToString(v.copy(sourceAgeMs=SystemClock.elapsedRealtime()-v.captureUptimeMs)))
+                }
+            }
+        }
         peer?.takeIf { it.paired }?.video?.trySend(v)
     }
     fun broadcastDetection(d: List<DetectionResult>) { /* No unassociated legacy results. */ }
     fun broadcastFrame(bytes: ByteArray) { /* VideoFrame identity is required. */ }
-    fun sendSnapshotCommand() { /* Captured analyzed snapshots are shown; remote capture is explicitly unavailable. */ }
+    fun requestFinishedPhoto(id: String) {
+        if(currentRole!=Role.COOK || _status.value!=ConnectionStatus.CONNECTED || id!=_sessionContext.value?.sessionId)return
+        val target=activeClientSession ?: return
+        requestedPhotoSession=id
+        viewModelScope.launch { runCatching { target.send("FINISH_PHOTO|$id") } }
+    }
+    fun sendSnapshotCommand() {
+        if(currentRole!=Role.COOK || _status.value!=ConnectionStatus.CONNECTED)return
+        val session=activeClientSession ?: return
+        val context=_sessionContext.value ?: return
+        _observation.value=null;_latestDetections.value=emptyList()
+        val request=java.util.UUID.randomUUID().toString();pendingAnalysisId=request
+        viewModelScope.launch { runCatching { session.send("ANALYZE|${context.sessionId}|$request") } }
+    }
     fun connectDirectly(host: String,port: Int)=connectToServer(host,port)
     override fun onCleared() { stop();super.onCleared() }
     private fun stopDiscovery() {

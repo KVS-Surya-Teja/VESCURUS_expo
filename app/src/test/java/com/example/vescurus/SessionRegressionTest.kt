@@ -55,6 +55,26 @@ class SessionRegressionTest {
         val reloaded=SessionStore(dir).load();assertEquals(state,reloaded)
         val exported=Json.decodeFromString<LocalState>(SessionStore(dir).export(state));assertEquals(state,exported)
     }
+    @Test fun olderSessionsLoadWithoutInventingFinishedPhotoOrElapsedTime() {
+        val legacy=Json.decodeFromString<CookingSession>("""{"id":"legacy-finished","completedAt":1234,"state":"DONE"}""")
+        assertNull(legacy.historyTitle)
+        assertNull(legacy.cookingStartedAt)
+        assertEquals(0L,legacy.activeCookingMs)
+        assertNull(legacy.finalPhotoPath)
+        assertNull(legacy.finalPhotoCapturedAt)
+    }
+    @Test fun completedDishMetadataAndPreparationSurviveStoreAndExport() {
+        val dir=temporary.newFolder()
+        val base=CookingSession()
+        val cooked=base.copy(entries=listOf(entry(base).copy(ingredientPreparation="diced, raw")),
+            state="DONE",completedAt=3000,cookingStartedAt=1000,activeCookingMs=1500,
+            historyTitle="My tomato dish",finalPhotoPath=File(dir,"finished.jpg").absolutePath,finalPhotoCapturedAt=3100)
+        val state=LocalState(active=CookingSession(),history=listOf(cooked))
+        val store=SessionStore(dir)
+        store.save(state)
+        assertEquals(cooked,SessionStore(dir).load().history.single())
+        assertEquals(cooked,Json.decodeFromString<LocalState>(store.export(state)).history.single())
+    }
     @Test fun corruptedPrimaryRecoversPreviousStateWithoutClobberingFiles() {
         val dir=temporary.newFolder();val store=SessionStore(dir);val first=LocalState()
         store.save(first);store.save(first.copy(active=first.active.copy(version=1)))
@@ -96,5 +116,21 @@ class SessionRegressionTest {
         assertFalse(com.example.vescurus.network.isValidPeerHost("7192.168.0.101"))
         assertFalse(com.example.vescurus.network.isValidPeerHost("192.168.0.999"))
         assertFalse(com.example.vescurus.network.isValidPeerHost("http://192.168.0.101"))
+    }
+    @org.junit.Test fun preparationOnlyCorrectionAdvancesRevisionAndRetainsAudit() {
+        val s=com.example.vescurus.session.CookingSession()
+        val e=com.example.vescurus.session.IngredientEntry(sessionId=s.id,identities=listOf("Carrot"),
+            identitySource=com.example.vescurus.session.EvidenceSource.MANUAL,ingredientPreparation="raw")
+        val added=com.example.vescurus.session.SessionReducer.add(s,e,1)
+        val edited=com.example.vescurus.session.SessionReducer.edit(added,e.id,e.identities,null,null,2,"diced")
+        org.junit.Assert.assertEquals(added.version+1,edited.version)
+        org.junit.Assert.assertEquals("diced",edited.entries.single().ingredientPreparation)
+        org.junit.Assert.assertEquals("raw",edited.entries.single().audits.single().previousPreparation)
+    }
+    @org.junit.Test fun savedPlanningNotesSurviveLocalStorageReload() {
+        val dir=temporary.newFolder()
+        val state=LocalState(active=CookingSession(planningNotes=listOf("Vegetarian", "Ready in 15 minutes")))
+        SessionStore(dir).save(state,false)
+        org.junit.Assert.assertEquals(state.active.planningNotes,SessionStore(dir).load(false).active.planningNotes)
     }
 }

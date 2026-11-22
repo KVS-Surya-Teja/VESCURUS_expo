@@ -1,30 +1,46 @@
 # VESCURUS exhibition build
 
-22 November 2026. Kotlin/Compose; existing Guide, Cook and Demonstration roles retained.
-The role picker presents them as Camera phone, Cooking phone and Practice session.
-Live scale transport and mounted calibration are not integrated in this branch.
+22 November 2026. Kotlin/Compose; Camera phone and Cooking phone roles.
+The role picker now offers Camera phone and Cooking phone only. Practice/Demo is
+not exposed; its legacy records and isolated test support are retained without deleting data.
+The ESP32/HX711 was unavailable during this run. Live scale transport and mounted
+calibration are not integrated in this branch.
 Enter externally measured amounts manually, or leave quantities unknown.
 
 ## Setup
 
-1. Install `app/build/outputs/apk/debug/app-debug.apk` on both phones.
+1. Install `app/build/outputs/apk/debug/app-debug.apk` on both phones. Natural
+   offline speech additionally uses the separately installed local voice provider
+   on Cook; see the pinned source-build installer below. A standard phone voice
+   remains available when that optional provider/model is absent.
 2. Connect both phones to the same internet-capable Wi-Fi/hotspot. USB debugging is
    for installation/testing; it is not the application transport.
 3. Select **Camera phone** on Guide and **Cooking phone** on the companion.
 4. On Cook, enter the Guide address, port **8766**, and its six-digit pairing code.
-   The connection status must show the phones are connected. Session/version details
-   are available under **Settings → Advanced details** when investigating a problem.
-5. Guide: tap **Analyze scene**, or deliberately enable Auto. Cook's camera is visible
-   by default in portrait. Choose **Live preview** or the matching **Analyzed frame**.
-6. In **Ingredients**, review a camera proposal or add an ingredient manually. Enter
-   a measured amount or leave it unknown. Confirm addition separately after transferring it.
-7. In **Recipes**, search Spoonacular, choose a saved result, or browse offline recipes.
-   Check recipe ingredients and additional ingredients separately.
-8. Choosing a recipe returns to **Assistant**. Start cooking, explicitly complete steps,
-   and confirm final completion. Pause/resume and step reminders remain available.
-   Timer expiry only prompts a check. Chat is available before and during cooking.
-9. **History** retains completed sessions and saved drafts. **Settings** exports JSON
-   through Android's document picker. Practice records remain separate from live records.
+   The connection status must show the phones are connected. Developer diagnostics
+   remain in logs and exported records, not product screens.
+5. Keep Camera phone aimed steadily. **All session operations happen on Cook**.
+   Tap **Identify ingredient** in Cook's camera HUD. Recognition runs on Guide,
+   returning the matching analyzed image. Live camera never carries old boxes.
+6. Assistant reports the proposed identity and confidence. Review/correct identity
+   and optional preparation (raw, sliced, diced, etc.), then record the amount.
+   Without connected/calibrated hardware, enter a manual amount or leave it unknown.
+   Recording preparation/weight does not confirm transfer into the dish.
+7. Choose **Next ingredient** and repeat, or **Find recipes**. Optional typed or
+   dictated preferences (diet, time, servings, corrections) inform AI planning.
+   Dictation is an editable draft. The voice toggle remains beside the composer.
+8. Review the generated recipe and its explicit optional pantry additions. It is
+   labelled AI-generated, with no fabricated source or nutrition. For changes,
+   chat first and choose **Update recipe with my preferences** in Recipes.
+   Sourced Spoonacular and offline browsing remain available separately.
+9. Start cooking, explicitly complete steps, pause/resume and use reminders.
+   Timer expiry never advances the step. Chat addresses mistakes/corrections in
+   current context; it does not silently rewrite completed steps or claim recovery.
+10. **Finish & save** records completion and requests a new photo from Guide.
+    Keep the finished dish in view. **Track** shows the local photo when delivered,
+    editable dish name (pencil), completion date and recorded active cooking time.
+    Available recipe nutrition is explicitly approximate, not an intake measurement;
+    vitamins and missing values remain unavailable. Settings exports **Save a copy**.
 
 ## Backend and local data
 
@@ -43,6 +59,13 @@ Android automatic backup is disabled; intentional export is available in Setting
 Export includes schema/session/event IDs, units, evidence source, confirmation and
 correction history. It omits API keys and camera image data.
 
+Chat and structured recipe planning use bounded header-authenticated REST with a
+45-second request bound and one retry for temporary 502/503/504 errors. They retain
+existing ingredients/recipe on failure. A real text-service check returned 503 and
+a later timeout; a listed older candidate returned 404 and a newer Flash
+candidate timed out. No model substitution was made. Successful planning is not
+yet claimed for those checks; cloud service availability is a demonstration risk.
+
 Cloud vision: explicit Gemini `gemini-3.1-flash-lite` REST requests with shared prompt
 and strict schema. Spoonacular uses the existing key in an HTTP header, explicit
 error states, source recipe IDs/attribution, saved local results and honest missing
@@ -55,7 +78,214 @@ verification. Local mode explicitly reports unavailable and never silently switc
 providers. Missing nutrition is unavailable. Built-in guides are labelled as such,
 not presented as Spoonacular results or measured food intake.
 
-## Cook interface refresh
+## Current exhibition refinement
+
+The current changes start from remote `759002f`, preserving its startup entrance,
+Kotlin/Compose architecture, recent conversation context and session/CV integrity.
+The camera and chat remain central. The contained camera uses about one third of
+the idle viewport, collapses for the keyboard and keeps Live/Last scan separate.
+Tabs and navigation have less visual weight;
+the pre-cooking recipe is a compact card. Ingredient correction/removal live
+inside the overflow menu; recording an ingredient and confirming physical transfer
+remain separate actions. Unknown amounts remain unknown. The composer exposes spoken guidance and
+native dictation; dictation produces an editable draft, never an automatic send.
+Dictation results from a different session are ignored.
+
+Camera phone is a passive aiming surface. Cook starts **Identify ingredient**;
+automatic scanning and camera-side session controls are not exposed. A separate result view shows the exact analyzed image.
+Repeated slices retain their boxes but share one non-overlapping identity label;
+labels draw after outlines. Confidence appears with the actual recognition proposal in Cook, as requested.
+Internal frame/session IDs, model names, revisions and audit disclosures stay out
+of product screens.
+Full machine-readable evidence remains in exported records and developer logs.
+Camera phone navigation contains Camera and Settings; cooking history belongs to
+Cooking phone. Demo/Practice is removed from the role picker, including restoration
+of a previously saved Demo role. Existing stored records are preserved.
+
+### Natural offline speech
+
+Requested voice: **speaker 5 / Rosie, speed 1.1**, using Apache-2.0 Kitten Nano
+0.8 FP32. VESCURUS selects the named voice explicitly; other apps' default speech
+engine is unchanged. Cooking text is normalized before speech. Muting, changing
+sessions and shutdown cancel playback. Phone speech remains a guarded fallback
+if the optional provider cannot initialize; provider failure must not crash cooking.
+
+Two upstream adapter issues were discovered during actual WAV generation checks:
+the official Sherpa Kitten engine returned only a WAV header because its service
+ignored returned audio when this model did not invoke the streaming callback;
+Hayai 2.5.1 declares a signature-only service permission that prevents ordinary
+Android TTS clients from binding. Neither silent output nor successful engine
+initialization alone counts as a voice pass. Kokoro produced real audio but took
+about 33 seconds for a short phrase on Samsung, too slow for this demonstration.
+
+Hayai is GPL-3.0-or-later; the model and Sherpa runtime are Apache-2.0. The
+provider remains a separate Android application using the standard TTS interface.
+The local Hayai adapter uses pinned upstream source with its own package
+`dev.vescurus.voice` and a corrected service declaration. It does not modify OS
+permissions. Reproduction and model provenance are in `tools/voice/engine.json`
+and `tools/voice/install_engine.py`. Source/model downloads and APKs stay in ignored
+`.local/voice/`; large binaries are not committed. The Samsung real-audio test passed with exact voice
+`kitten-nano-en-v0_8-fp32#5#expr-voice-4-f` at 1.1: 235,686-byte mono 24-kHz WAV,
+4.909 seconds of audio, generated in 5,807 ms. The application log subsequently
+confirmed “Offline voice ready: speaker 5, speed 1.1”. This is a generation test;
+perceived naturalness remains the user's listening judgment.
+
+Sources: [Hayai source](https://github.com/HayaiApp/HayaiTTS/tree/v2.5.1),
+[Kitten model/license](https://huggingface.co/KittenML/kitten-tts-nano-0.8-fp32),
+[Sherpa Kitten implementation](https://github.com/k2-fsa/sherpa-onnx/blob/v2.0.2/sherpa-onnx/csrc/offline-tts-kitten-impl.h).
+
+### Figma AI and production UI refinement
+
+[Editable Figma file](https://www.figma.com/design/Zcx3aNpssrtaWoefR8OLJJ)
+contains the original supplied vector logo, actual Cook/keyboard/camera references,
+explicitly labelled journal test fixture, and the complete product/constraints brief.
+The Production UI page has editable native screens/components, Roboto typography,
+Material library instances, source-derived color tokens, and only discrete camera
+content as image fills. It is a design reference, not physical verification.
+[Native design render](ui-review/figma-native-direction.png).
+
+Figma AI generated an initial text-based four-screen concept using plan credits.
+The subsequent six-reference-image Weave run was prepared with the actual logo,
+physical screenshots and full brief, but rejected because GPT Image 2.5 is not
+available on the linked Free plan; **that run did not execute or charge**. No saved
+Weave workflows were available. No purchase or hidden alternative generation was
+made. Actual assets were not claimed to have reached that blocked model run.
+
+Compose follows the useful AI direction: quieter rounded camera HUD, restrained
+gold and a clear microphone, one primary next action, recognition review ahead of
+an already-selected recipe, passive Guide, and photo-led compact journal entries.
+Ingredient bookkeeping is expandable; absent nutrition does not create an empty
+chart. The original startup entrance and native camera/session logic remain.
+
+Planning notes are stored privately with the session, separately from the rolling
+scan conversation, so early dietary/time constraints survive repeated recognition
+and app restart. Request generations and cancellation prevent an old recipe job
+from blocking a new session or speaking into a different session. User ingredient/
+preference changes and starting cooking also invalidate an unfinished plan.
+
+### Cook-owned workflow and finished records
+
+Remote recognition commands are restricted to the current paired owner/session,
+with bounded request-ID deduplication. The resulting observation carries the request
+identity, preventing an older in-flight result from satisfying the next scan.
+Normal frame/stream/session freshness gates remain. No recognition adds entries
+without review. Preparation proposals are a bounded optional visual vocabulary,
+not proof of doneness/safety; user correction is retained with the ingredient.
+
+Finished photos use a one-shot request after completion; Guide supplies its next
+new frame, Cook checks the session and pending request, then stores it privately.
+Reconnect/session changes invalidate unfinished requests. A missing photo remains
+missing. Titles do not rewrite source recipe identity. Active duration is accumulated
+with the existing monotonic cooking timer and excludes pauses. Old records keep
+unknown duration instead of invented timing. New fields have serialization defaults.
+
+The pure ScaleMeasurementGate has a five-second continuous stable-reading window,
+explicit calibrated-zero baseline, configurable measured tolerances, identity/epoch/
+sequence checks, packet-gap/freshness rejection, and explicit pending association.
+Its automated tests do not establish hardware accuracy. No ESP32 endpoint or LCD
+firmware is claimed integrated without the actual working sketch/hardware.
+
+### Local service shutdown
+
+A physical role-switch test found a Netty shutdown crash with a WebSocket still
+connected (`RejectedExecutionException: event executor terminated`). The Guide now
+uses the already-present Ktor CIO server engine. The protocol, port, pairing,
+ownership and freshness rules are unchanged. The Android protocol test additionally
+stops/restarts Guide with Cook still connected, checks that old observations clear,
+and accepts a fresh observation after recovery. Physical confirmation is recorded
+in the final verification below; the engine change is not itself proof of success.
+
+### Physical verification in this continuation
+
+- Both original authorized phones received the same debug APK with data preserved.
+- The returning-role startup entrance was observed in the real Samsung hierarchy;
+  camera video, keyboard opening/closing, workspace switching and scrolling were
+  exercised. Samsung's configured display density and 1.1 font scale were not changed.
+- A blind real-camera plate scene returned Apple and Orange with multiple boxes;
+  session `8402bd2f`, stream `b094e8cf`, frame 339, 3,653 ms. Expected identities
+  were never placed in the inference request. A separate plain-view scene returned
+  no food. Original input/result captures remain under ignored `.local/device/ui-synthesis/`.
+- A manual Apple entry was saved with unknown amount, then corrected to Apple Slices.
+  Its ID was retained, revision advanced to 3 and no transfer was confirmed. It
+  survived installs/restarts. A Spoonacular query displayed an honest no-matches
+  result; no matching fruit recipe or physically cooked meal is claimed.
+- A genuine cloud chat exchange remembered the earlier mild-food preference and
+  named the selected Tomato & onion sauté. This was a recipe/context check,
+  not evidence that fruit was cooked using that unrelated recipe.
+- The user confirmed native dictation and the earlier phone-voice reply worked.
+  Replacement offline voice verification is tracked separately above.
+- Same-subnet Wi-Fi temporarily failed direct reachability with “No route to host”.
+  Rejoining Redmi to Wi-Fi restored reachability and automatic pairing without
+  resetting session data. Same subnet alone does not establish a healthy local link.
+- On Redmi, changing from the paired Camera role to role selection and back
+  preserved process 31348 and reconnected automatically; the former connected
+  shutdown crash did not recur in this check.
+- The simplified build was installed on both phones with data preserved; Redmi
+  was restored to Camera phone and automatically paired with Samsung. The latest
+  dark/covered input correctly delivered an empty food result to Cook.
+- ADB can still omit static screen regions while video updates. Earlier physical
+  display confirmation was normal; screenshots are assessed with that limitation.
+
+### Final verification gate
+
+Latest local debug APK available for later installation: `9a37e98feb4f3641947cfaa521a786510ac6d248c34e95f7d9dd5ece1f069c07`.
+
+Last physically installed debug APK SHA-256 (both devices, before disconnection):
+`bef216dd77a0078a57f71de5e6adc7ad7d2121d948afb17f82b3e96fd7d4e0b2`.
+Redmi `aibyojwcfyemdmce` and Samsung `RZ8M906DQ3K` were independently checked
+against the local APK; data was preserved. Natural voice provider is additionally
+installed on Samsung. Physical camera/control checks used these two devices.
+
+The final build completed application/test APKs, **49 JVM tests with no failures**,
+and lint with **0 errors** (warnings/hints remain). **21 Python API tests**
+also passed, covering preparation and request-correlation parity. The earlier lint internal FIR
+analysis failure did not recur on the successful gate. Seven Android tests passed on Samsung (61.64 seconds), including non-skipped
+real Kitten audio generation, unknown quantity/correction/removal, retained recipe
+with camera review, protocol recovery/remote commands/photos, and storage recovery.
+The preparation-only revision/audit correction, later UI refinement and recipe-job
+ownership fixes were added afterward. The user intentionally disconnected both
+phones; the newest APK needs later physical installation/recheck. Two additional
+Android regression cases cover late recipe replies and starting cooking while a
+planner is pending. The final GitHub emulator gate checks all nine Android cases;
+the optional physical voice test is expected to skip without its installed model.
+
+Native review images: [Cook controls](ui-review/physical-cook-controls.png),
+[keyboard](ui-review/physical-cook-keyboard.png),
+[journal fixture](ui-review/physical-journal-fixture.png). The journal image is an
+isolated automated fixture on Samsung, **not real cooking or measured intake**;
+its Practice label belongs to retained test support, not an exposed Demo role.
+Actual main-role screenshots contain no Demo controls.
+
+ isolated test fixtures are never
+represented as a physically cooked meal or a real scale measurement.
+
+### Scale: reported wiring and pending work
+
+Reported assembly: HX711 DT **18**, SCK **19**; I²C SDA **21**, SCL **22**;
+16×2 LCD at **0x27**; `HX711_ADC` and `LiquidCrystal_I2C`; provisional factor **350**.
+No working sketch was present in the repository or supplied in this run, and no
+ESP32 USB device was connected. These are user-reported pins, not inspected wiring.
+No firmware, real scale transport, tare/calibration response or measured quantity
+has been verified or substituted with simulated data.
+
+After mounting, extend the actual sketch: responsive HX711 sampling, separately
+throttled LCD/network updates, no blanket ±5 g suppression, explicit tare and
+persisted calibration. A future local transport can reuse Guide's HTTP service
+and forward scale packets to Cook, the session owner. Packets need device/boot ID,
+sequence, sender uptime, tare/calibration epochs, stable/unstable state and grams;
+restarts or epoch changes invalidate any unfinished before/after baseline.
+Duplicates must not create repeated ingredient entries. Association and transfer
+remain explicit user confirmations.
+
+Mounted calibration procedure (pending): record zero with the final platform/bowl;
+apply several known loads spanning the useful range; repeat each placement at
+least five times; record settling, error against each known load, spread, zero
+return and drift. Repeat after bowl removal/replacement and device restart.
+Report the actual error/repeatability before claiming useful 1 g performance.
+Displayed 1 g increments do not establish 1 g accuracy. No measured end-to-end
+cooking demonstration can be claimed until that hardware is present and calibrated.
+
+## Earlier UI synthesis (historical baseline)
 
 The UI combines the camera/chat presentation of `198b88a` with the CV and session
 implementation of `87752d3`. Live video has no detection boxes. Analysis displays
@@ -77,7 +307,7 @@ recognition, transport, freshness and session reducers were retained.
 - `CookPreviews.kt` uses current components, including a narrow, larger-font recipe
   card. These are component previews, not a simulated full-screen workflow.
 
-## Verification of this UI refresh
+## Historical emulator verification of UI synthesis
 
 The application revision was verified by [GitHub Actions run 45015967411](https://github.com/KVS-Surya-Teja/VESCURUS_expo/actions/runs/45015967411)
 at commit `3f056a58ceef3b16bb81ae5af296a101df7ed885`:
@@ -93,9 +323,8 @@ at commit `3f056a58ceef3b16bb81ae5af296a101df7ed885`:
 
 These checks use isolated test/manual data and do not call live cloud vision or
 Spoonacular. The physical-phone evidence below belongs to the preceding CV build;
-it does not establish that this UI revision has been installed on either phone.
-After pulling and building locally, install the same APK on both phones and check
-live video, a matching analyzed frame, chat, and recipe pause/save/resumption.
+it did not establish physical installation at that stage. Current device results
+are recorded in the refinement section above.
 
 ### Native UI review
 

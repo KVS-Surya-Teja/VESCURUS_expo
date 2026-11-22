@@ -23,7 +23,8 @@ data class IngredientDetection(
     val confidence: Float,
     val box_2d: BoundingBox,
     val alternatives: List<DetectionCandidate> = emptyList(),
-    val is_supported: Boolean = true
+    val is_supported: Boolean = true,
+    val preparation: String? = null
 )
 
 @Serializable

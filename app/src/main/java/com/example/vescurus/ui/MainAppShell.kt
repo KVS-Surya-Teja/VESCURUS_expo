@@ -52,7 +52,7 @@ import com.example.vescurus.network.VescurusConnectionManager
 
 sealed class NavItem(val route: String, val icon: ImageVector, val label: String) {
     object Cook : NavItem("cook", Icons.Default.Restaurant, "Cook")
-    object Track : NavItem("track", Icons.Default.History, "History")
+    object Track : NavItem("track", Icons.Default.History, "Track")
     object Settings : NavItem("settings", Icons.Default.Settings, "Settings")
 }
 
@@ -79,6 +79,19 @@ fun MainAppShell(
     val observation by connectionManager.observation.collectAsStateWithLifecycle()
     val peerSession by connectionManager.sessionContext.collectAsStateWithLifecycle()
     val ownPairCode by connectionManager.pairCode.collectAsStateWithLifecycle()
+    val analysisRequest by connectionManager.analysisRequest.collectAsStateWithLifecycle()
+    val finishedPhoto by connectionManager.finishedPhoto.collectAsStateWithLifecycle()
+    val analysisRequestId by connectionManager.analysisRequestId.collectAsStateWithLifecycle()
+    LaunchedEffect(selectedRole,connectionStatus,cookViewModel.session.completedAt,cookViewModel.session.finalPhotoPath) {
+        if(selectedRole==Role.COOK && cookViewModel.session.completedAt!=null && cookViewModel.session.finalPhotoPath==null && connectionStatus==ConnectionStatus.CONNECTED)
+            connectionManager.requestFinishedPhoto(cookViewModel.sessionId)
+    }
+    LaunchedEffect(finishedPhoto) {
+        finishedPhoto?.let { photo ->
+            if(selectedRole==Role.COOK && photo.sessionId==cookViewModel.sessionId && cookViewModel.session.completedAt!=null)
+                cookViewModel.attachFinalPhoto(photo.sessionId,android.util.Base64.decode(photo.jpegBase64,android.util.Base64.NO_WRAP))
+        }
+    }
 
     LaunchedEffect(selectedRole) {
         cookViewModel.setDemonstration(selectedRole == Role.DEMONSTRATE)
@@ -100,9 +113,9 @@ fun MainAppShell(
     }
     DisposableEffect(selectedRole) { onDispose { connectionManager.stop() } }
 
-    var selectedItem by rememberSaveable { mutableStateOf(0) }
+    var selectedItem by rememberSaveable(selectedRole) { mutableStateOf(0) }
     val previousItem = remember { mutableStateOf(0) }
-    val items = listOf(NavItem.Cook, NavItem.Track, NavItem.Settings)
+    val items = if (selectedRole == Role.GUIDE) listOf(NavItem.Cook, NavItem.Settings) else listOf(NavItem.Cook, NavItem.Track, NavItem.Settings)
 
     Scaffold(
         modifier = Modifier.semantics { testTagsAsResourceId = true },
@@ -111,7 +124,8 @@ fun MainAppShell(
                 containerColor = Color(0xFF020617),
                 contentColor = GoldPrimary,
                 tonalElevation = 0.dp,
-                modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars)
+                windowInsets = WindowInsets(0, 0, 0, 0),
+                modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars).height(64.dp)
             ) {
                 items.forEachIndexed { index, item ->
                     val selected = selectedItem == index
@@ -185,7 +199,9 @@ fun MainAppShell(
                             latestFrameFlow = connectionManager.latestFrame,
                             onBroadcastDetection = { connectionManager.broadcastDetection(it) },
                             onBroadcastFrame = { connectionManager.broadcastFrame(it) },
-                            onSnapshot = { connectionManager.sendSnapshotCommand() },
+                            onSnapshot = { if(cookViewModel.beginIngredientRecognition()) connectionManager.sendSnapshotCommand() },
+                            remoteAnalysisRequest = analysisRequest,
+                            remoteAnalysisRequestId = analysisRequestId,
                             onDirectConnect = { ip, port -> connectionManager.connectDirectly(ip, port) },
                             viewModel = cookViewModel,
                             onBack = onResetRole,
@@ -220,6 +236,8 @@ fun RoleSpecificCookScreen(
     onBroadcastDetection: (List<DetectionResult>) -> Unit,
     onBroadcastFrame: (ByteArray) -> Unit,
     onSnapshot: () -> Unit,
+    remoteAnalysisRequest: Long = 0,
+    remoteAnalysisRequestId: String? = null,
     onDirectConnect: (String, Int) -> Unit,
     viewModel: CookViewModel,
     onBack: () -> Unit,
@@ -238,7 +256,8 @@ fun RoleSpecificCookScreen(
                 onDetectionsUpdated = { onBroadcastDetection(it) },
                 onFrameAvailable = onBroadcastFrame,
                 onBack = onBack,
-                observation = observation, sessionId = sessionId, onObservation = onObservation, onVideoAvailable = onVideoAvailable
+                observation = observation, sessionId = sessionId, onObservation = onObservation, onVideoAvailable = onVideoAvailable,
+                remoteAnalysisRequest = remoteAnalysisRequest, remoteAnalysisRequestId = remoteAnalysisRequestId
             )
         }
         Role.COOK -> {
@@ -279,20 +298,15 @@ fun AccountScreen(role: Role, viewModel: CookViewModel, onResetRole: () -> Unit,
     val scope=rememberCoroutineScope()
     val status by connectionManager.status.collectAsStateWithLifecycle()
     val diagnostics by connectionManager.diagnostics.collectAsStateWithLifecycle()
-    val observation by connectionManager.observation.collectAsStateWithLifecycle()
-    val pairCode by connectionManager.pairCode.collectAsStateWithLifecycle()
-    val cameraFresh by connectionManager.cameraFresh.collectAsStateWithLifecycle()
-    val visionStatus by connectionManager.visionStatus.collectAsStateWithLifecycle()
     var exportMessage by remember { mutableStateOf<String?>(null) }
-    var detailsExpanded by rememberSaveable { mutableStateOf(false) }
     val exporter=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if(uri!=null) {
             val content=viewModel.exportJson()
             scope.launch {
                 exportMessage=withContext(Dispatchers.IO) { runCatching {
                     requireNotNull(context.contentResolver.openOutputStream(uri)).bufferedWriter().use { it.write(content) }
-                    "Session export saved."
-                }.getOrDefault("Export could not be saved. Your phone records are retained.") }
+                    "Copy saved."
+                }.getOrDefault("Could not save a copy. Your cooking records are still on this phone.") }
             }
         }
     }
@@ -313,27 +327,11 @@ fun AccountScreen(role: Role, viewModel: CookViewModel, onResetRole: () -> Unit,
         ConnectionStatus.DISCONNECTED, ConnectionStatus.LOST -> "Phone disconnected"
         ConnectionStatus.IDLE -> "Not connected"
     }
-    // Keep actionable failures visible; raw session/protocol details stay in the disclosure below.
+    // Keep connection failures actionable without exposing protocol details.
     val connectionNotice = diagnostics.takeIf { message ->
         listOf("rejected", "could not", "unavailable", "lost", "retry", "disconnected", "enter ")
             .any { message.contains(it, ignoreCase = true) }
     }?.substringBefore(" |")
-    val recognitionLabel = when (visionStatus) {
-        "SUCCESS" -> "Analysis ready"
-        "POOR_IMAGE" -> "Needs a clearer view"
-        "QUOTA_OR_RATE_LIMIT" -> "Usage limit reached"
-        "TIMEOUT" -> "Analysis timed out"
-        "NETWORK_UNAVAILABLE" -> "Check internet connection"
-        "UNCONFIGURED" -> "Setup required"
-        "CREDENTIAL_FAILURE" -> "Service access failed"
-        "MODEL_UNAVAILABLE", "ON_DEVICE_UNAVAILABLE" -> "Recognition unavailable"
-        "BLOCKED_OR_EMPTY_RESPONSE", "INCOMPLETE_RESPONSE", "MALFORMED_RESPONSE", "API_FAILURE" -> "Analysis unavailable"
-        else -> when {
-            visionStatus.startsWith("Analysis expired") -> "Result expired"
-            observation == null -> "Waiting for analysis"
-            else -> "Analysis unavailable"
-        }
-    }
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
@@ -341,7 +339,7 @@ fun AccountScreen(role: Role, viewModel: CookViewModel, onResetRole: () -> Unit,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("SETTINGS", color = GoldPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
-            Text("Make it yours", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
+            Text("Settings", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
             Text(deviceLabel, color = muted, fontSize = 14.sp)
         }
 
@@ -352,19 +350,14 @@ fun AccountScreen(role: Role, viewModel: CookViewModel, onResetRole: () -> Unit,
                     Text(connectionLabel, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                 }
                 connectionNotice?.let { Text(it, color = GoldPrimary, fontSize = 13.sp) }
-                if (role == Role.GUIDE) {
-                    SettingsValue("Wi-Fi address", connectionManager.getLocalIpAddress())
-                    SettingsValue("Pairing code", pairCode, highlight = true)
-                } else if (status != ConnectionStatus.CONNECTED) {
+                if (role != Role.GUIDE && status != ConnectionStatus.CONNECTED) {
                     Text("Connect to your camera phone from Cook.", color = muted, fontSize = 13.sp)
                 }
-                SettingsValue("Camera", if (cameraFresh) "Streaming" else "No current stream")
-                SettingsValue("Recognition", recognitionLabel)
                 Text("Ingredient recognition needs internet.", color = muted, fontSize = 12.sp)
             }
         }
 
-        SessionCard("Voice guidance") {
+        if (role != Role.GUIDE) SessionCard("Voice guidance") {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Spoken guidance", color = Color.White, fontSize = 15.sp)
@@ -374,17 +367,13 @@ fun AccountScreen(role: Role, viewModel: CookViewModel, onResetRole: () -> Unit,
             }
         }
 
-        SessionCard("Ingredient quantities", "Manual entry") {
-            Text("No connected scale. Enter your measured amounts as you prepare.", color = muted, fontSize = 13.sp)
-        }
-
-        SessionCard("Saved on this phone") {
+        if (role != Role.GUIDE) SessionCard("Saved on this phone") {
             Text(
                 when {
                     viewModel.isLoading -> "Loading your records…"
                     viewModel.isSaving -> "Saving your changes…"
-                    viewModel.sessions.isEmpty() -> "Your current session is kept here."
-                    else -> "${viewModel.sessions.size} saved ${if (viewModel.sessions.size == 1) "session" else "sessions"}"
+                    viewModel.sessions.isEmpty() -> "Your cooking is saved automatically."
+                    else -> "${viewModel.sessions.size} saved cooking ${if (viewModel.sessions.size == 1) "record" else "records"}"
                 },
                 color = Color.White, fontSize = 14.sp
             )
@@ -397,49 +386,14 @@ fun AccountScreen(role: Role, viewModel: CookViewModel, onResetRole: () -> Unit,
                 onClick = { exporter.launch("vescurus-${viewModel.sessionId.take(8)}.json") },
                 enabled = !viewModel.isLoading,
                 modifier = Modifier.fillMaxWidth().testTag("export-session")
-            ) { Text("Export sessions") }
+            ) { Text("Save a copy") }
             exportMessage?.let { Text(it, color = GoldPrimary, fontSize = 12.sp) }
         }
 
         OutlinedButton(onClick = onResetRole, modifier = Modifier.fillMaxWidth().testTag("switch-role")) {
-            Text("Change how this phone is used")
+            Text("Switch phone role")
         }
 
-        Column {
-            TextButton(onClick = { detailsExpanded = !detailsExpanded }, modifier = Modifier.fillMaxWidth().testTag("advanced-details")) {
-                Text("Advanced details", modifier = Modifier.weight(1f), textAlign = TextAlign.Start, color = muted)
-                Icon(if (detailsExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null, tint = muted)
-            }
-            AnimatedVisibility(detailsExpanded) {
-                SessionCard("Connection & records") {
-                    Text("${role.name} · Android ${android.os.Build.VERSION.RELEASE}", color = muted, fontSize = 12.sp)
-                    Text("Local address: ${connectionManager.getLocalIpAddress()}", color = muted, fontSize = 12.sp)
-                    Text(diagnostics.ifBlank { "No active peer connection." }, color = muted, fontSize = 12.sp)
-                    Text("Recognition: $visionStatus", color = muted, fontSize = 12.sp)
-                    Text("Engine: ${com.example.vescurus.di.AppModule.engineDescription}", color = muted, fontSize = 12.sp)
-                    observation?.let {
-                        Text("Snapshot ${it.frameId} · ${it.status} · ${it.inferenceMs} ms", color = muted, fontSize = 12.sp)
-                    }
-                    Text("Session ${viewModel.sessionId} · revision ${viewModel.sessionVersion}", color = muted, fontSize = 12.sp)
-                    Text("Exports include your current session, history and correction records in JSON format.", color = muted, fontSize = 12.sp)
-                }
-            }
-        }
         Text("VESCURUS", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, color = muted, fontSize = 11.sp, letterSpacing = 2.sp)
-    }
-}
-
-@Composable
-private fun SettingsValue(label: String, value: String, highlight: Boolean = false) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.Top) {
-        Text(label, color = Color(0xFF94A3B8), fontSize = 13.sp, modifier = Modifier.weight(0.8f))
-        Text(
-            value,
-            color = if (highlight) GoldPrimary else Color.White,
-            fontSize = if (highlight) 18.sp else 13.sp,
-            fontWeight = if (highlight) FontWeight.Bold else FontWeight.Normal,
-            textAlign = TextAlign.End,
-            modifier = Modifier.weight(1.2f)
-        )
     }
 }

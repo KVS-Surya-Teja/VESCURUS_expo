@@ -20,6 +20,14 @@ class VisionContractTests(unittest.TestCase):
   for box in [[0,0,0,0],[700,500,100,900],[-1,0,100,100],[1,2,3],[0,0,1001,1000]]:
    data={'detections':[{'label':'tomato','confidence':.8,'box_2d':box,'is_supported':True}],'overall_confidence':.8}
    with self.assertRaises(VisionError):parse_response(json.dumps(data))
+ def test_preparation_is_optional_bounded_and_only_for_supported_food(self):
+  for raw,supported,expected in [(' DICED ',True,'diced'),('julienne',True,'julienne'),
+    ('fried',False,None),('cooked',True,None),('x'*25,True,None),(None,True,None),(5,True,None)]:
+   item={'label':'tomato','confidence':.8,'box_2d':[0,0,100,100],'is_supported':supported,'preparation':raw}
+   detection=parse_response(json.dumps({'detections':[item],'overall_confidence':.8}))[0]
+   self.assertEqual(expected,detection.get('preparation'))
+  del item['preparation']
+  self.assertNotIn('preparation',parse_response(json.dumps({'detections':[item],'overall_confidence':.8}))[0])
  def test_rejects_nan_confidence(self):
   with self.assertRaises(VisionError):parse_response('{"detections":[],"overall_confidence":NaN}')
  def test_rejects_invalid_image(self):

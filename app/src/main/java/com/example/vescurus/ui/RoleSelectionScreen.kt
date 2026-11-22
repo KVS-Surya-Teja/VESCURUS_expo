@@ -104,7 +104,7 @@ fun RoleSelectionScreen(onRoleSelected: (Role) -> Unit) {
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Text(
-                        text = "Pair two phones, or explore recipes on your own.",
+                        text = "One phone watches. One helps you cook.",
                         color = Color.White.copy(alpha = 0.65f),
                         fontSize = 14.sp,
                         textAlign = TextAlign.Center,
@@ -137,11 +137,6 @@ fun RoleSelectionScreen(onRoleSelected: (Role) -> Unit) {
                         "Cooking phone", "COOK",
                         "Review ingredients and follow your recipe, one step at a time.",
                         Icons.Default.Restaurant, GoldPrimary, Role.COOK
-                    ),
-                    CardDef(
-                        "Practice session", "PRACTICE",
-                        "Explore offline recipes. Practice records are kept separate.",
-                        Icons.Default.AutoAwesome, Color(0xFFA855F7), Role.DEMONSTRATE
                     )
                 )
 

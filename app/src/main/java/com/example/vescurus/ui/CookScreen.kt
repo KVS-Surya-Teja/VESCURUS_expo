@@ -1,6 +1,14 @@
 package com.example.vescurus.ui
 
 import android.graphics.BitmapFactory
+import android.app.Activity
+import android.content.Intent
+import android.content.ActivityNotFoundException
+import android.speech.RecognizerIntent
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateDpAsState
@@ -73,7 +81,8 @@ private data class EntryEditor(
     val amount: String = "",
     val unit: QuantityUnit = QuantityUnit.GRAMS,
     val vision: VisionEvidence? = null,
-    val requestId: String = UUID.randomUUID().toString()
+    val requestId: String = UUID.randomUUID().toString(),
+    val condition: String = ""
 )
 
 @Composable
@@ -88,9 +97,9 @@ fun SessionCard(
         color = SurfaceNavy,
         border = BorderStroke(1.dp, Color.White.copy(alpha = .07f))
     ) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 if (subtitle != null) Text(subtitle, color = Muted, fontSize = 12.sp, lineHeight = 17.sp)
             }
             content()
@@ -122,8 +131,29 @@ fun CookScreen(
     var showGuides by rememberSaveable { mutableStateOf(false) }
     var timerDialog by rememberSaveable { mutableStateOf(false) }
     var chat by rememberSaveable { mutableStateOf("") }
+    var ingredientReviewed by rememberSaveable { mutableStateOf(false) }
 
     val haptic = LocalHapticFeedback.current
+    val context = LocalContext.current
+    var dictationSession by rememberSaveable { mutableStateOf<String?>(null) }
+    val dictation = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK && dictationSession == viewModel.session.id) {
+            result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let { spoken ->
+                chat = if (chat.isBlank()) spoken else "$chat $spoken"
+            }
+        }
+    }
+    fun dictate() {
+        dictationSession = viewModel.session.id
+        try {
+            dictation.launch(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "Ask VESCURUS")
+            })
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(context, "Voice input is unavailable on this phone. You can still type your question.", Toast.LENGTH_LONG).show()
+        }
+    }
     val assistantScroll = rememberLazyListState()
     val ingredientScroll = rememberLazyListState()
     val recipeScroll = rememberLazyListState()
@@ -138,10 +168,19 @@ fun CookScreen(
     }
 
     fun reviewObservation(name: String) {
+        val proposedPreparation = observation?.detections?.firstOrNull {
+            canonicalizeIngredientLabel(it.label)?.equals(name, true) == true
+        }?.preparation.orEmpty()
         editor = EntryEditor(
             input = name,
-            vision = observation?.let { VisionEvidence(it.sessionId, it.streamId, it.frameId, name) }
+            vision = observation?.let { VisionEvidence(it.sessionId, it.streamId, it.frameId, name) },
+            condition = proposedPreparation
         )
+    }
+    fun identifyIngredient() {
+        ingredientReviewed = false
+        workspace = 0
+        onSnapshot()
     }
     fun sendQuestion() {
         val question = chat.trim()
@@ -157,7 +196,10 @@ fun CookScreen(
         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
     }
 
-    LaunchedEffect(session.id) { chat = "" }
+    LaunchedEffect(session.id) { chat = ""; dictationSession = null; ingredientReviewed = false }
+    LaunchedEffect(observation?.sessionId, observation?.streamId, observation?.frameId) {
+        observation?.let { viewModel.receiveIngredientObservation(it) }
+    }
     LaunchedEffect(session.id, recipe?.id, viewModel.cookingState, session.step) {
         assistantScroll.scrollToItem(0)
     }
@@ -180,17 +222,18 @@ fun CookScreen(
         IngredientDialog(
             editor = entry,
             onDismiss = { editor = null },
-            onSave = { name, amount, unit ->
+            onSave = { name, amount, unit, condition ->
                 if (entry.id == null) {
                     viewModel.addIngredient(
                         name, amount, unit,
                         entry.vision?.takeIf { it.label.equals(name.trim(), true) },
-                        entry.requestId
+                        entry.requestId, condition
                     )
                 } else {
-                    viewModel.correctEntry(entry.id, name, amount, unit)
+                    viewModel.correctEntry(entry.id, name, amount, unit, condition)
                 }
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                ingredientReviewed = true
                 editor = null
             }
         )
@@ -209,7 +252,7 @@ fun CookScreen(
         // Keep the composer and current task usable in landscape and when the keyboard opens.
         val compactCamera = cameraCollapsed || keyboardVisible || availableHeight < 500.dp
         val cameraHeight by animateDpAsState(
-            targetValue = if (compactCamera) 56.dp else (availableHeight * .40f).coerceIn(210.dp, 330.dp),
+            targetValue = if (compactCamera) 52.dp else (availableHeight * if (viewModel.cookingState == CookingState.COOKING) .28f else .34f).coerceIn(180.dp, 280.dp),
             animationSpec = tween(180),
             label = "camera-height"
         )
@@ -226,14 +269,17 @@ fun CookScreen(
                     latestFrame = latestFrame,
                     onModeChange = { analyzed = it },
                     onConnect = { connect = true },
+                    onRecognize = ::identifyIngredient,
+                    recognizing = viewModel.recognitionInProgress,
+                    primaryRecognition = recipe == null && !ingredientReviewed && observations.isEmpty(),
                     onToggleSize = { cameraCollapsed = !cameraCollapsed },
                     canExpand = !keyboardVisible && availableHeight >= 500.dp,
-                    modifier = Modifier.fillMaxWidth().height(cameraHeight)
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).height(cameraHeight)
                 )
             }
 
-            if (!tightWorkspace) Row(
-                Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
+            if (!tightWorkspace && (recipe == null || workspace != 0)) Row(
+                Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -245,10 +291,11 @@ fun CookScreen(
                     Text(
                         when {
                             session.completedAt != null -> "Your cooking record"
-                            recipe != null -> recipe.name
+                            workspace == 1 -> "Your ingredients"
+                            workspace == 2 -> "Choose a recipe"
                             else -> "What are we cooking?"
                         },
-                        color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold,
+                        color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                         maxLines = 1, overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.testTag("session-title")
                     )
@@ -257,7 +304,7 @@ fun CookScreen(
                     viewModel.isLoading -> "Loading…"
                     viewModel.storageMessage != null -> "Not saved"
                     viewModel.isSaving -> "Saving…"
-                    else -> "Saved on phone"
+                    else -> "Saved"
                 }
                 Row(verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -288,6 +335,26 @@ fun CookScreen(
                         viewModel.storageMessage?.let { notice ->
                             item("storage") { StorageNotice(notice, viewModel::retrySave) }
                         }
+                        if (session.completedAt == null &&
+                            viewModel.cookingState != CookingState.COOKING &&
+                            (recipe == null || viewModel.recognitionInProgress || observations.isNotEmpty() || ingredientReviewed)) {
+                            item("welcome") {
+                                IngredientRecognitionCard(
+                                    connected = status == ConnectionStatus.CONNECTED,
+                                    busy = viewModel.recognitionInProgress,
+                                    planning = viewModel.isFetchingRecipes,
+                                    notice = viewModel.recognitionMessage,
+                                    detections = detections,
+                                    reviewed = ingredientReviewed,
+                                    hasIngredients = entries.isNotEmpty(),
+                                    onIdentify = ::identifyIngredient,
+                                    onReview = ::reviewObservation,
+                                    onManual = { editor = EntryEditor() },
+                                    onConnect = { connect = true },
+                                    onRecipes = { viewModel.planRecipeForIngredients(); workspace = 0 }
+                                )
+                            }
+                        }
                         if (recipe != null) {
                             item("current-task") {
                                 CurrentRecipeCard(
@@ -297,54 +364,28 @@ fun CookScreen(
                                     onRecipeDetails = { workspace = 2 }
                                 )
                             }
-                        } else {
-                            item("welcome") {
-                                AssistantWelcome(
-                                    ingredientCount = entries.size,
-                                    isLoading = viewModel.isLoading,
-                                    isDemo = viewModel.isDemo,
-                                    onAdd = { editor = EntryEditor() },
-                                    onRecipes = { workspace = 2 }
-                                )
-                            }
                         }
-                        if (observations.isNotEmpty() && session.completedAt == null && recipe == null) {
-                            item("camera-proposals") {
-                                IngredientProposals(observations, ::reviewObservation)
-                            }
-                        }
-                        if (viewModel.messages.isEmpty()) {
+                        if (viewModel.messages.isEmpty() && recipe != null) {
                             item("assistant-intro") {
-                                Row(
-                                    Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 4.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    Icon(Icons.Default.AutoAwesome, null, tint = GoldPrimary, modifier = Modifier.size(19.dp))
-                                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                        Text("Your cooking companion", color = SoftWhite, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                                        Text(
-                                            if (recipe == null) "Ask about preparation, ingredients or what to cook."
-                                            else "Ask about this recipe or any step along the way.",
-                                            color = Muted, fontSize = 12.sp, lineHeight = 17.sp
-                                        )
-                                    }
-                                }
+                                Text("Ask about your recipe or the next step.",
+                                    color = Muted, fontSize = 12.sp, lineHeight = 17.sp,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp))
                             }
                         }
                         items(viewModel.messages.size, key = { "message-$it" }) { index ->
                             CookChatBubble(viewModel.messages[index])
                         }
-                        if (viewModel.isGenerating) {
+                        if (viewModel.isGenerating || viewModel.isFetchingRecipes) {
                             item("thinking") {
                                 Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                                     CircularProgressIndicator(Modifier.size(14.dp), color = GoldPrimary, strokeWidth = 2.dp)
-                                    Text("Thinking…", color = Muted, fontSize = 12.sp)
+                                    Text(if (viewModel.isFetchingRecipes) "Planning your recipe…" else "Thinking…", color = Muted, fontSize = 12.sp)
                                 }
                             }
                         }
                     }
-                    ChatComposer(chat, { chat = it }, viewModel.isGenerating, !viewModel.isLoading, ::sendQuestion)
+                    ChatComposer(chat, { chat = it }, viewModel.isGenerating, !viewModel.isLoading, ::sendQuestion, viewModel.isTtsEnabled, viewModel::toggleVoice, ::dictate)
                 }
 
                 1 -> LazyColumn(
@@ -357,7 +398,7 @@ fun CookScreen(
                         item("storage") { StorageNotice(notice, viewModel::retrySave) }
                     }
                     item("ingredients-header") {
-                        SessionCard("Your ingredients", "Review what's prepared, then confirm when you've added it to the recipe.") {
+                        SessionCard("Your ingredients", "Add what you have. Mark it added only after it goes into the recipe.") {
                             if (entries.isEmpty()) {
                                 Text("Start with an ingredient or a mixed batch.", color = Muted, fontSize = 13.sp)
                             }
@@ -371,7 +412,7 @@ fun CookScreen(
                                 ) {
                                     Icon(Icons.Default.Add, null, Modifier.size(18.dp))
                                     Spacer(Modifier.width(7.dp))
-                                    Text("Add ingredient or mixed batch", fontWeight = FontWeight.SemiBold)
+                                    Text("Add ingredient", fontWeight = FontWeight.SemiBold)
                                 }
                             }
                         }
@@ -387,7 +428,8 @@ fun CookScreen(
                                 editor = EntryEditor(
                                     entry.id, entry.identities.joinToString(", "),
                                     entry.quantity?.value?.let(::formatQuantity).orEmpty(),
-                                    entry.quantity?.unit ?: QuantityUnit.GRAMS
+                                    entry.quantity?.unit ?: QuantityUnit.GRAMS,
+                                    condition = entry.ingredientPreparation.orEmpty()
                                 )
                             },
                             onUndo = { viewModel.undoEntry(entry.id) },
@@ -428,7 +470,7 @@ fun CookScreen(
                                     color = SoftWhite, fontSize = 13.sp
                                 )
                                 Button(
-                                    onClick = { viewModel.fetchRecipesForIngredients() },
+                                    onClick = { viewModel.planRecipeForIngredients(); workspace = 0 },
                                     enabled = viewModel.confirmedIngredients.isNotEmpty() && !viewModel.isFetchingRecipes && !viewModel.isLoading,
                                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("search-recipes"),
                                     colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = Color.Black),
@@ -441,9 +483,13 @@ fun CookScreen(
                                         Icon(Icons.Default.Search, null, Modifier.size(18.dp))
                                         Spacer(Modifier.width(8.dp))
                                     }
-                                    Text(if (viewModel.isFetchingRecipes) "Finding recipes…" else "Find recipes", fontWeight = FontWeight.SemiBold)
+                                    Text(if (viewModel.isFetchingRecipes) "Finding recipes…" else if(recipe!=null) "Update recipe with my preferences" else "Find recipes", fontWeight = FontWeight.SemiBold)
                                 }
                                 Text(viewModel.recipeMessage, color = Muted, fontSize = 12.sp, lineHeight = 17.sp)
+                                TextButton(onClick = { viewModel.fetchRecipesForIngredients() },
+                                    enabled = !viewModel.isFetchingRecipes && viewModel.confirmedIngredients.isNotEmpty()) {
+                                    Text("Browse sourced recipes instead")
+                                }
                                 TextButton(
                                     onClick = { showGuides = !showGuides },
                                     modifier = Modifier.fillMaxWidth().testTag("offline-guides")
@@ -489,21 +535,21 @@ private fun WorkspaceTabs(selected: Int, onSelect: (Int) -> Unit) {
     val showIcons = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 420 &&
         LocalDensity.current.fontScale <= 1.15f
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 16.dp).background(SurfaceNavy, RoundedCornerShape(14.dp)).padding(4.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(3.dp)
     ) {
         labels.forEachIndexed { index, label ->
             val active = selected == index
             Surface(
                 onClick = { onSelect(index) },
-                color = if (active) GoldPrimary.copy(alpha = .15f) else Color.Transparent,
+                color = Color.Transparent,
                 shape = RoundedCornerShape(11.dp),
                 modifier = Modifier.weight(1f).heightIn(min = 44.dp)
                     .semantics { this.selected = active }
                     .testTag("cook-tab-${label.lowercase()}")
             ) {
                 Row(
-                    Modifier.padding(horizontal = 5.dp, vertical = 10.dp),
+                    Modifier.padding(horizontal = 5.dp, vertical = 7.dp),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -531,6 +577,9 @@ private fun GuideCameraHero(
     latestFrame: ByteArray?,
     onModeChange: (Boolean) -> Unit,
     onConnect: () -> Unit,
+    onRecognize: () -> Unit,
+    recognizing: Boolean,
+    primaryRecognition: Boolean,
     onToggleSize: () -> Unit,
     canExpand: Boolean,
     modifier: Modifier = Modifier
@@ -546,35 +595,31 @@ private fun GuideCameraHero(
     }
     val statusText = when {
         diagnostics.contains("code rejected", ignoreCase = true) -> "Check pairing code"
-        connected -> "Guide connected"
+        connected -> "Camera connected"
         status == ConnectionStatus.CONNECTING -> "Connecting…"
         status == ConnectionStatus.RECONNECTING -> "Reconnecting…"
-        status == ConnectionStatus.DISCONNECTED || status == ConnectionStatus.LOST -> "Guide disconnected"
-        status == ConnectionStatus.FOUND -> "Guide found"
+        status == ConnectionStatus.DISCONNECTED || status == ConnectionStatus.LOST -> "Camera disconnected"
+        status == ConnectionStatus.FOUND -> "Camera found"
         else -> "Ready to connect"
     }
     Column(
-        modifier.clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))
+        modifier.clip(RoundedCornerShape(20.dp))
             .background(SurfaceNavy)
     ) {
         Row(
-            Modifier.fillMaxWidth().height(56.dp).padding(start = 16.dp, end = 6.dp),
+            Modifier.fillMaxWidth().height(44.dp).padding(start = 16.dp, end = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(9.dp)
         ) {
-            Icon(Icons.Default.Videocam, null, tint = GoldPrimary, modifier = Modifier.size(23.dp))
+            Box(Modifier.size(8.dp).clip(CircleShape).background(if (connected) SavedGreen else Muted))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(visionNotice ?: "Guide camera", color = if (visionNotice != null) GoldPrimary else Color.White,
-                    fontSize = if (visionNotice != null) 12.sp else 14.sp, fontWeight = FontWeight.SemiBold,
+                Text(visionNotice ?: statusText, color = if (visionNotice != null) GoldPrimary else Color.White,
+                    fontSize = 12.sp, fontWeight = FontWeight.Medium,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Box(Modifier.size(5.dp).background(if (connected) SavedGreen else Muted, CircleShape))
-                    Text(statusText, color = if (connected) SavedGreen else Muted, fontSize = 10.sp,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
+
             }
             TextButton(onClick = onConnect, modifier = Modifier.testTag("guide-connect")) {
-                Text(if (connected) "Pairing" else "Connect", color = GoldPrimary, fontSize = 12.sp)
+                Icon(if (connected) Icons.Default.Link else Icons.Default.LinkOff, if (connected) "Pairing details" else "Connect camera phone", tint = if (connected) Muted else GoldPrimary, modifier = Modifier.size(20.dp))
             }
             IconButton(
                 onClick = onToggleSize,
@@ -595,19 +640,39 @@ private fun GuideCameraHero(
                 } else {
                     LiveGuideFrame(latestFrameFlow, latestFrame, connected, Modifier.fillMaxSize())
                 }
+                if (connected) {
+                    FilledTonalButton(
+                        onClick = onRecognize,
+                        enabled = !recognizing,
+                        modifier = Modifier.align(Alignment.BottomCenter).padding(10.dp)
+                            .testTag("recognize-ingredients"),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = if (primaryRecognition) GoldPrimary else SurfaceNavy.copy(alpha = .94f),
+                            contentColor = if (primaryRecognition) Color.Black else SoftWhite),
+                        shape = RoundedCornerShape(24.dp)
+                    ) {
+                        Icon(Icons.Default.CenterFocusStrong, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(when {
+                            recognizing -> "Identifying…"
+                            primaryRecognition -> "Identify ingredient"
+                            else -> "Scan ingredient"
+                        }, fontWeight = FontWeight.SemiBold)
+                    }
+                }
             }
             Row(
                 Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 12.dp, vertical = 3.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                listOf(false to "Live preview", true to "Analyzed frame").forEach { (mode, label) ->
+                listOf(false to "Live camera", true to "Last scan").forEach { (mode, label) ->
                     Surface(
                         onClick = { onModeChange(mode) },
                         modifier = Modifier.weight(1f).fillMaxHeight()
                             .semantics { selected = analyzed == mode }
                             .testTag(if (mode) "camera-analyzed" else "camera-live"),
-                        color = if (analyzed == mode) Color.White.copy(alpha = .08f) else Color.Transparent,
+                        color = if (analyzed == mode) GoldPrimary.copy(alpha = .10f) else Color.Transparent,
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
@@ -653,8 +718,77 @@ private fun LiveGuideFrame(
                     null, tint = GoldPrimary.copy(alpha = .7f), modifier = Modifier.size(28.dp))
                 Text(if (connected) "Waiting for camera" else "Your kitchen, in view",
                     color = SoftWhite, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                Text(if (connected) "Check the camera on your Guide phone." else "Connect the Guide phone to see your preparation area.",
+                Text(if (connected) "Point your camera phone at the ingredients." else "Connect your camera phone to see your ingredients.",
                     color = Muted, fontSize = 11.sp, textAlign = TextAlign.Center, lineHeight = 15.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun IngredientRecognitionCard(
+    connected: Boolean,
+    busy: Boolean,
+    planning: Boolean,
+    notice: String?,
+    detections: List<DetectionResult>,
+    reviewed: Boolean,
+    hasIngredients: Boolean,
+    onIdentify: () -> Unit,
+    onReview: (String) -> Unit,
+    onManual: () -> Unit,
+    onConnect: () -> Unit,
+    onRecipes: () -> Unit
+) {
+    val proposals = detections.filter { it.supported && it.confidence >= .5f }
+        .distinctBy { canonicalizeIngredientLabel(it.label) }.take(2)
+    SessionCard(
+        when {
+            planning -> "Planning your recipe"
+            busy -> "Looking at your ingredient"
+            reviewed -> "Ready for your recipe"
+            proposals.isNotEmpty() -> "Review your ingredient"
+            else -> "Let’s see what you have"
+        }
+    ) {
+        when {
+            busy -> Row(verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                CircularProgressIndicator(Modifier.size(18.dp), color = GoldPrimary, strokeWidth = 2.dp)
+                Text("Keep the ingredient in view.", color = Muted, fontSize = 13.sp)
+            }
+            reviewed -> Text("Place the next ingredient in view, or find a recipe with what you’ve saved.",
+                color = Muted, fontSize = 13.sp, lineHeight = 19.sp)
+            proposals.isNotEmpty() -> {
+                proposals.forEach { detection ->
+                    val name = canonicalizeIngredientLabel(detection.label) ?: detection.label
+                    OutlinedButton(onClick = { onReview(name) }, modifier = Modifier.fillMaxWidth()) {
+                        Text("$name · ${(detection.confidence * 100).toInt()}% · Review", maxLines = 2)
+                    }
+                }
+                Text("Confirm the name, then enter its weight. Without a scale, enter a manual amount or leave it unknown.",
+                    color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
+                if (proposals.size > 1) Text("Weigh separately, or record the whole batch together. Its weight cannot be split automatically.",
+                    color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
+            }
+            else -> Text(notice ?: if (connected) "Place one ingredient in view and tap Identify ingredient on the camera."
+                else "Connect a camera phone, or enter your ingredients below.",
+                color = Muted, fontSize = 13.sp, lineHeight = 19.sp)
+        }
+        if (!busy) {
+            if (!connected) OutlinedButton(onClick = onConnect,
+                modifier = Modifier.fillMaxWidth()) { Text("Connect camera phone") }
+            if (hasIngredients) Button(onClick = onRecipes, enabled = !planning,
+                colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = Color.Black),
+                modifier = Modifier.fillMaxWidth().testTag("find-recipes")) {
+                Text(if (planning) "Planning recipe…" else "Find recipes")
+            }
+            if (reviewed) OutlinedButton(
+                onClick = onIdentify, enabled = connected && !planning,
+                modifier = Modifier.fillMaxWidth().testTag("next-ingredient")
+            ) { Text("Next ingredient") }
+            TextButton(onClick = onManual, enabled = !planning, modifier = Modifier.testTag("add-ingredient")) {
+                Text("Enter an ingredient manually")
             }
         }
     }
@@ -664,42 +798,26 @@ private fun LiveGuideFrame(
 private fun AssistantWelcome(
     ingredientCount: Int,
     isLoading: Boolean,
-    isDemo: Boolean,
     onAdd: () -> Unit,
     onRecipes: () -> Unit
 ) {
-    SessionCard(
-        if (ingredientCount == 0) "Start with what you have" else "Let's find your recipe",
-        if (ingredientCount == 0) "Add your ingredients, or explore an offline recipe."
-        else "$ingredientCount ingredient entries ready to use."
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = onAdd,
-                enabled = !isLoading,
-                modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("add-ingredient"),
+    Column(Modifier.fillMaxWidth().padding(4.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(if (ingredientCount == 0) "Add ingredients to find a recipe." else "Your ingredients are ready. Choose a recipe.",
+            color = SoftWhite, fontSize = 14.sp, lineHeight = 20.sp)
+        if (ingredientCount == 0) {
+            Button(onClick = onAdd, enabled = !isLoading,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("add-ingredient"),
                 shape = RoundedCornerShape(13.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = Color.Black),
-                contentPadding = PaddingValues(horizontal = 8.dp)
-            ) {
-                Icon(Icons.Default.Add, null, Modifier.size(17.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("Ingredient", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = Color.Black)) {
+                Icon(Icons.Default.Add, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp))
+                Text("Add ingredients", fontWeight = FontWeight.SemiBold)
             }
-            OutlinedButton(
-                onClick = onRecipes,
-                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+        } else {
+            Button(onClick = onRecipes, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                 shape = RoundedCornerShape(13.dp),
-                contentPadding = PaddingValues(horizontal = 8.dp)
-            ) {
-                Icon(Icons.Default.MenuBook, null, Modifier.size(17.dp))
-                Spacer(Modifier.width(5.dp))
-                Text("Recipes", fontSize = 12.sp)
+                colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = Color.Black)) {
+                Text("Choose a recipe", fontWeight = FontWeight.SemiBold)
             }
-        }
-        if (isDemo) {
-            Text("Practice with offline guides. Your demo records stay separate.",
-                color = Muted, fontSize = 11.sp, lineHeight = 16.sp)
         }
     }
 }
@@ -709,7 +827,7 @@ private fun IngredientProposals(names: List<String>, onReview: (String) -> Unit)
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Icon(Icons.Default.Videocam, null, tint = Muted, modifier = Modifier.size(15.dp))
-            Text("From Guide · tap to review", color = Muted, fontSize = 11.sp)
+            Text("Found by camera · tap to review", color = Muted, fontSize = 11.sp)
         }
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(names) { name ->
@@ -728,19 +846,20 @@ private fun IngredientEntryCard(
     onUndo: () -> Unit,
     onTransfer: () -> Unit
 ) {
+    var showActions by remember { mutableStateOf(false) }
     SessionCard(
         entry.label,
         when (entry.status) {
-            EntryStatus.TRANSFER_CONFIRMED -> "Added to recipe · confirmed by you"
-            EntryStatus.PREPARED -> "Prepared · not yet marked as added"
-            else -> "Ingredient confirmed · quantity unknown"
+            EntryStatus.TRANSFER_CONFIRMED -> "Added to recipe"
+            EntryStatus.PREPARED -> "Ready to add"
+            else -> "Not added yet"
         }
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically) {
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(entry.quantity?.let { "${formatQuantity(it.value)} ${it.unit.label}" } ?: "Quantity unknown",
-                    color = GoldPrimary, fontSize = if (entry.quantity == null) 17.sp else 24.sp, fontWeight = FontWeight.Bold)
+                Text(entry.quantity?.let { "${formatQuantity(it.value)} ${it.unit.label}" } ?: "Amount not entered",
+                    color = GoldPrimary, fontSize = if (entry.quantity == null) 14.sp else 20.sp, fontWeight = FontWeight.Bold)
                 if (entry.quantity != null) Text(
                     when (entry.quantitySource) {
                         EvidenceSource.SCALE -> "Measured by scale"
@@ -749,8 +868,22 @@ private fun IngredientEntryCard(
                     }, color = Muted, fontSize = 11.sp
                 )
             }
-            if (entry.status == EntryStatus.TRANSFER_CONFIRMED) {
-                Icon(Icons.Default.CheckCircle, null, tint = SavedGreen, modifier = Modifier.size(25.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (entry.status == EntryStatus.TRANSFER_CONFIRMED) {
+                    Icon(Icons.Default.CheckCircle, null, tint = SavedGreen, modifier = Modifier.size(22.dp))
+                }
+                if (editable) Box {
+                    IconButton(onClick = { showActions = true }, modifier = Modifier.testTag("ingredient-actions-${entry.id}")) {
+                        Icon(Icons.Default.MoreVert, "Edit ingredient", tint = Muted)
+                    }
+                    DropdownMenu(expanded = showActions, onDismissRequest = { showActions = false },
+                        modifier = Modifier.semantics { testTagsAsResourceId = true }) {
+                        DropdownMenuItem(text = { Text("Correct ingredient") },
+                            onClick = { showActions = false; onCorrect() }, modifier = Modifier.testTag("correct-${entry.id}"))
+                        DropdownMenuItem(text = { Text("Remove ingredient") },
+                            onClick = { showActions = false; onUndo() }, modifier = Modifier.testTag("undo-${entry.id}"))
+                    }
+                }
             }
         }
         if (entry.identities.size > 1) {
@@ -764,12 +897,8 @@ private fun IngredientEntryCard(
                 ) {
                     Icon(Icons.Default.Check, null, Modifier.size(16.dp))
                     Spacer(Modifier.width(7.dp))
-                    Text("Confirm added to recipe", fontSize = 12.sp)
+                    Text("I’ve added this", fontSize = 12.sp)
                 }
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = onCorrect, modifier = Modifier.testTag("correct-${entry.id}")) { Text("Correct") }
-                TextButton(onClick = onUndo, modifier = Modifier.testTag("undo-${entry.id}")) { Text("Undo", color = Muted) }
             }
         }
     }
@@ -795,12 +924,9 @@ private fun CurrentRecipeCard(
                 color = GoldPrimary, trackColor = Color.White.copy(alpha = .07f)
             )
             Text(recipe.steps.getOrNull(session.step)?.instruction.orEmpty(),
-                color = Color.White, fontSize = 20.sp, lineHeight = 28.sp, fontWeight = FontWeight.Medium)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Elapsed ${formatTime(session.stepElapsedMs)}", color = Muted, fontSize = 11.sp)
-                session.stepTimerSeconds?.let {
-                    Text("Reminder ${formatTime(it * 1000)}", color = GoldPrimary, fontSize = 11.sp)
-                }
+                color = Color.White, fontSize = 17.sp, lineHeight = 24.sp, fontWeight = FontWeight.Medium)
+            session.stepTimerSeconds?.let {
+                Text("Reminder ${formatTime(it * 1000)}", color = GoldPrimary, fontSize = 11.sp)
             }
             viewModel.timerNotice?.let {
                 Text(it, color = GoldPrimary, fontSize = 12.sp, lineHeight = 17.sp)
@@ -841,7 +967,7 @@ private fun CurrentRecipeCard(
             ) {
                 Icon(Icons.Default.Check, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(7.dp))
-                Text(if (session.step == recipe.steps.lastIndex) "I completed the final step" else "I completed this step",
+                Text(if (session.step == recipe.steps.lastIndex) "Final step done" else "Done, next step",
                     fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             }
             if (session.step > 0) {
@@ -852,9 +978,9 @@ private fun CurrentRecipeCard(
         }
 
         CookingState.DONE -> SessionCard(
-            if (session.completedAt == null) "Ready to save your session?" else "Cooking record saved",
-            if (session.completedAt == null) "Review your ingredients and confirm that you've finished."
-            else "Find your recipe and ingredient record in History."
+            if (session.completedAt == null) "Finished cooking?" else "Cooking record saved",
+            if (session.completedAt == null) "Point the camera phone at your finished dish, then save."
+            else "Your dish and ingredient record are saved in Track."
         ) {
             if (session.completedAt != null) {
                 Icon(Icons.Default.CheckCircle, null, tint = SavedGreen, modifier = Modifier.size(34.dp))
@@ -863,7 +989,7 @@ private fun CurrentRecipeCard(
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("new-session"),
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = Color.Black)
-                ) { Text("Start a new session", fontWeight = FontWeight.SemiBold) }
+                ) { Text("Cook something new", fontWeight = FontWeight.SemiBold) }
             } else {
                 TextButton(onClick = onIngredients) { Text("Review ingredients") }
                 Button(
@@ -871,36 +997,31 @@ private fun CurrentRecipeCard(
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("save-session"),
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = Color.Black)
-                ) { Text("Confirm completion & save", fontWeight = FontWeight.SemiBold) }
+                ) { Text("Finish & save", fontWeight = FontWeight.SemiBold) }
                 TextButton(onClick = viewModel::returnToCooking, modifier = Modifier.fillMaxWidth()) {
                     Text("Go back to cooking", color = Muted)
                 }
             }
         }
 
-        else -> SessionCard("Your next dish") {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                RecipeArtwork(recipe, Modifier.size(72.dp).clip(RoundedCornerShape(13.dp)))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(recipe.name, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                    Text(recipeSummary(recipe), color = Muted, fontSize = 12.sp, lineHeight = 16.sp)
+        else -> Surface(color = SurfaceNavy, shape = RoundedCornerShape(18.dp)) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    RecipeArtwork(recipe, Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(recipe.name, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
+                        Text(recipeSummary(recipe), color = Muted, fontSize = 11.sp)
+                    }
+                    IconButton(onClick = onRecipeDetails) { Icon(Icons.Default.Info, "Recipe details", tint = Muted, modifier = Modifier.size(20.dp)) }
                 }
-            }
-            Text(recipe.description, color = Muted, fontSize = 12.sp, lineHeight = 17.sp,
-                maxLines = 3, overflow = TextOverflow.Ellipsis)
-            Button(
-                onClick = viewModel::startCooking,
-                enabled = !viewModel.isLoading && recipe.steps.isNotEmpty(),
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("start-cooking"),
-                colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = Color.Black),
-                shape = RoundedCornerShape(14.dp)
-            ) {
-                Icon(Icons.Default.PlayArrow, null, Modifier.size(19.dp))
-                Spacer(Modifier.width(7.dp))
-                Text("Start cooking", fontWeight = FontWeight.SemiBold)
-            }
-            TextButton(onClick = onRecipeDetails, modifier = Modifier.fillMaxWidth()) {
-                Text("View ingredients & recipe", color = Muted, fontSize = 12.sp)
+                Button(onClick = viewModel::startCooking,
+                    enabled = !viewModel.isLoading && recipe.steps.isNotEmpty(),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("start-cooking"),
+                    colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = Color.Black),
+                    shape = RoundedCornerShape(13.dp)) {
+                    Icon(Icons.Default.PlayArrow, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp)); Text("Start cooking", fontWeight = FontWeight.SemiBold)
+                }
             }
         }
     }
@@ -932,16 +1053,17 @@ private fun RecipeDetailsCard(recipe: Recipe, cooking: Boolean, onReturn: () -> 
 }
 
 @Composable
-private fun ChatComposer(value: String, onValueChange: (String) -> Unit, busy: Boolean, ready: Boolean, onSend: () -> Unit) {
+private fun ChatComposer(value: String, onValueChange: (String) -> Unit, busy: Boolean, ready: Boolean, onSend: () -> Unit, voiceEnabled: Boolean, onToggleVoice: () -> Unit, onDictate: () -> Unit) {
     Surface(color = KitchenBackground, shadowElevation = 10.dp) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 9.dp)) {
             TextField(
                 value = value,
                 onValueChange = onValueChange,
                 enabled = ready,
+                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp, lineHeight = 20.sp),
                 modifier = Modifier.fillMaxWidth().testTag("chat-input"),
                 placeholder = { Text("Ask VESCURUS…", color = Muted, fontSize = 13.sp) },
-                shape = RoundedCornerShape(25.dp),
+                shape = RoundedCornerShape(28.dp),
                 maxLines = 3,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { onSend() }),
@@ -951,9 +1073,20 @@ private fun ChatComposer(value: String, onValueChange: (String) -> Unit, busy: B
                     focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
                     cursorColor = GoldPrimary
                 ),
-                leadingIcon = { Icon(Icons.Default.AutoAwesome, null, tint = GoldPrimary, modifier = Modifier.size(19.dp)) },
+                leadingIcon = {
+                    IconButton(onClick = onToggleVoice, modifier = Modifier.testTag("voice-guidance")) {
+                        Icon(if (voiceEnabled) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
+                            if (voiceEnabled) "Mute spoken guidance" else "Enable spoken guidance",
+                            tint = if (voiceEnabled) SoftWhite else Muted, modifier = Modifier.size(21.dp))
+                    }
+                },
                 trailingIcon = {
-                    IconButton(
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (value.isBlank() && !busy) IconButton(onClick = onDictate, enabled = ready,
+                        modifier = Modifier.padding(end = 5.dp).size(40.dp).clip(CircleShape)
+                            .background(if (ready) GoldPrimary else Muted.copy(alpha = .2f)).testTag("chat-dictate")) {
+                        Icon(Icons.Default.Mic, "Dictate question", tint = if (ready) Color.Black else Muted, modifier = Modifier.size(21.dp))
+                    } else IconButton(
                         onClick = onSend,
                         enabled = value.isNotBlank() && !busy && ready,
                         modifier = Modifier.testTag("chat-send")
@@ -961,6 +1094,7 @@ private fun ChatComposer(value: String, onValueChange: (String) -> Unit, busy: B
                         if (busy) CircularProgressIndicator(Modifier.size(20.dp), color = GoldPrimary, strokeWidth = 2.dp)
                         else Icon(Icons.AutoMirrored.Filled.Send, "Send question",
                             tint = if (value.isNotBlank()) GoldPrimary else Muted, modifier = Modifier.size(21.dp))
+                    }
                     }
                 }
             )
@@ -1011,28 +1145,46 @@ private fun StepTimerDialog(onDismiss: () -> Unit, onSave: (Long?) -> Unit) {
 }
 
 @Composable
-private fun IngredientDialog(editor: EntryEditor, onDismiss: () -> Unit, onSave: (String, Double?, QuantityUnit) -> Unit) {
+private fun IngredientDialog(editor: EntryEditor, onDismiss: () -> Unit, onSave: (String, Double?, QuantityUnit, String?) -> Unit) {
     var input by rememberSaveable(editor.requestId) { mutableStateOf(editor.input) }
     var amount by rememberSaveable(editor.requestId) { mutableStateOf(editor.amount) }
     var unit by rememberSaveable(editor.requestId) { mutableStateOf(editor.unit) }
+    var condition by rememberSaveable(editor.requestId) { mutableStateOf(editor.condition) }
+    var nameConfirmed by rememberSaveable(editor.requestId) { mutableStateOf(editor.vision == null || editor.id != null) }
     val value = amount.trim().toDoubleOrNull()
     val valid = input.isNotBlank() && input.length <= 240 &&
         (amount.isBlank() || (value != null && value.isFinite() && value > 0 && value <= 10_000_000 &&
             (unit != QuantityUnit.COUNT || value % 1.0 == 0.0)))
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (editor.id == null) "Review ingredient" else "Correct entry") },
+        title = { Text(when {
+            editor.id != null -> "Edit ingredient"
+            !nameConfirmed -> "Is this the right ingredient?"
+            editor.vision != null -> "Record the amount"
+            else -> "Review ingredient"
+        }) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Add one ingredient, or separate a mixed batch with commas.", fontSize = 13.sp)
                 OutlinedTextField(
-                    input, { input = it }, label = { Text("Ingredient / batch contents") },
+                    input, { input = it }, label = { Text("Ingredient or ingredients") },
                     modifier = Modifier.fillMaxWidth().semantics { testTagsAsResourceId = true }.testTag("ingredient-name")
                 )
                 OutlinedTextField(
+                    condition, { condition = it.take(120) },
+                    label = { Text("Preparation (optional)") },
+                    supportingText = { Text(if (editor.vision != null && editor.condition.isNotBlank())
+                        "Camera suggestion — check or correct it before confirming."
+                        else "For example: raw, fried, diced or julienne.") },
+                    modifier = Modifier.fillMaxWidth().semantics { testTagsAsResourceId = true }
+                        .testTag("ingredient-preparation")
+                )
+                if (nameConfirmed) {
+                if (editor.vision != null) Text("Place $input on your scale. Enter its reading below. No scale is connected to this session; this amount will be recorded as manual.", fontSize = 13.sp)
+                OutlinedTextField(
                     amount, { amount = it },
                     keyboardOptions = KeyboardOptions(keyboardType = if (unit == QuantityUnit.COUNT) KeyboardType.Number else KeyboardType.Decimal),
-                    label = { Text("Measured quantity (optional)") },
+                    label = { Text("Amount (optional)") },
                     supportingText = { Text("Leave blank if you haven't measured it.") },
                     isError = amount.isNotBlank() && !valid,
                     singleLine = true,
@@ -1043,15 +1195,24 @@ private fun IngredientDialog(editor: EntryEditor, onDismiss: () -> Unit, onSave:
                         FilterChip(selected = unit == choice, onClick = { unit = choice }, label = { Text(choice.label) })
                     }
                 }
-                Text("Quantity is entered by you. Confirm transfer separately after adding it to the recipe.",
+                Text("Mark it added only after you put it into your dish.",
                     fontSize = 12.sp)
+                }
             }
         },
         confirmButton = {
             TextButton(
-                enabled = valid, onClick = { onSave(input.trim(), value, unit) },
+                enabled = valid, onClick = {
+                    if (!nameConfirmed) nameConfirmed = true else onSave(input.trim(), value, unit,
+                        condition.trim().takeIf { it.isNotEmpty() })
+                },
                 modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("save-ingredient")
-            ) { Text(if (editor.id == null) "Confirm entry" else "Save correction") }
+            ) { Text(when {
+                !nameConfirmed -> "Confirm name & continue"
+                editor.id != null -> "Save changes"
+                amount.isBlank() -> "Save without amount"
+                else -> "Save ingredient"
+            }) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
@@ -1064,30 +1225,37 @@ fun GuideConnectionDialog(onDismiss: () -> Unit, onConnect: (String, Int) -> Uni
     var host by rememberSaveable { mutableStateOf(prefs.getString("guideHost", "").orEmpty()) }
     var port by rememberSaveable { mutableStateOf(prefs.getInt("guidePort", 8766).toString()) }
     var code by rememberSaveable { mutableStateOf(prefs.getString("guidePairCode", "").orEmpty()) }
+    var connectionOptions by rememberSaveable { mutableStateOf(port != "8766") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Connect Guide") },
+        title = { Text("Connect camera phone") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Enter the details shown on Guide. Keep both phones on the same Wi-Fi or hotspot.")
+                Text("Enter the address and code shown on your camera phone. Keep both phones on the same Wi-Fi.")
                 OutlinedTextField(
                     host, { host = it },
                     isError = host.isNotBlank() && !com.example.vescurus.network.isValidPeerHost(host),
-                    label = { Text("Guide IP / hostname") }, singleLine = true,
+                    label = { Text("Camera address") }, singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                     modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("guide-host")
                 )
+                OutlinedTextField(
+                    code, { code = it.filter(Char::isDigit).take(6) },
+                    label = { Text("Pairing code") }, singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("guide-code")
+                )
+                TextButton(onClick = { connectionOptions = !connectionOptions }) {
+                    Text(if(connectionOptions) "Hide connection options" else "Connection options")
+                }
+                if(connectionOptions) {
                 OutlinedTextField(
                     port, { port = it }, label = { Text("Port") }, singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("guide-port")
                 )
-                OutlinedTextField(
-                    code, { code = it.filter(Char::isDigit).take(6) },
-                    label = { Text("Six-digit Guide pairing code") }, singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("guide-code")
-                )
+                }
+
             }
         },
         confirmButton = {
@@ -1180,7 +1348,7 @@ fun CookChatBubble(msg: ChatMessage) {
             ) {
                 Column(Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
                     verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text(if (isUser) "YOU" else if (isNotice) "ASSISTANT NOTICE" else "VESCURUS · AI SUGGESTION",
+                    Text(if (isUser) "YOU" else "VESCURUS",
                         color = if (isUser) Muted else GoldPrimary, fontSize = 9.sp, fontWeight = FontWeight.Bold,
                         letterSpacing = .6.sp)
                     Text(msg.message, color = SoftWhite, fontSize = 13.sp, lineHeight = 19.sp)

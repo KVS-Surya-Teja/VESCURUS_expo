@@ -76,5 +76,211 @@
     ]
   },
   "installedApkSha256": "240871d80a326fd8dfb6d0fb2005cfc800be1349117a244bf4f480225a78901a",
-  "physicalDisplayConfirmation": "User confirmed the Samsung physical display looks normal during live preview; intermittent ADB screenshots omit static regions."
+  "physicalDisplayConfirmation": "User confirmed the Samsung physical display looks normal during live preview; intermittent ADB screenshots omit static regions.",
+  "uiSynthesisContinuation": {
+    "baseline": "759002f8c3d0965a9d07ee6dc3b1f2b935bd0b67",
+    "date": "2026-11-22",
+    "observations": [
+      {
+        "sessionId": "8402bd2f-42c9-4029-9311-0f7d456a6f2d",
+        "streamId": "270034d9-bb94-4a30-b45e-c0ab387e81b1",
+        "frameId": 171,
+        "captureUptimeMs": 361877819,
+        "width": 480,
+        "height": 640,
+        "engine": "GEMINI/gemini-3.1-flash-lite",
+        "status": "SUCCESS",
+        "inferenceMs": 3066,
+        "sourceAgeMs": 3107,
+        "rotationApplied": 90
+      },
+      {
+        "sessionId": "8402bd2f-42c9-4029-9311-0f7d456a6f2d",
+        "streamId": "c807382e-8322-4bd7-b7eb-bd62e03b33bf",
+        "frameId": 8,
+        "captureUptimeMs": 362065126,
+        "width": 480,
+        "height": 640,
+        "engine": "GEMINI/gemini-3.1-flash-lite",
+        "status": "SUCCESS",
+        "inferenceMs": 3834,
+        "sourceAgeMs": 3846,
+        "detections": [
+          {
+            "label": "Orange",
+            "confidence": 0.985,
+            "box_2d": {
+              "top": 0.054,
+              "left": 0.065,
+              "bottom": 0.364,
+              "right": 0.311
+            }
+          },
+          {
+            "label": "Apple",
+            "confidence": 0.972,
+            "box_2d": {
+              "top": 0.132,
+              "left": 0.343,
+              "bottom": 0.564,
+              "right": 0.725
+            }
+          },
+          {
+            "label": "Apple",
+            "confidence": 0.965,
+            "box_2d": {
+              "top": 0.36,
+              "left": 0.056,
+              "bottom": 0.594,
+              "right": 0.396
+            }
+          },
+          {
+            "label": "Orange",
+            "confidence": 0.982,
+            "box_2d": {
+              "top": 0.352,
+              "left": 0.575,
+              "bottom": 0.656,
+              "right": 0.989
+            }
+          },
+          {
+            "label": "Orange",
+            "confidence": 0.978,
+            "box_2d": {
+              "top": 0.508,
+              "left": 0.075,
+              "bottom": 0.776,
+              "right": 0.568
+            }
+          },
+          {
+            "label": "Orange",
+            "confidence": 0.952,
+            "box_2d": {
+              "top": 0.732,
+              "left": 0.075,
+              "bottom": 0.888,
+              "right": 0.418
+            }
+          },
+          {
+            "label": "Apple",
+            "confidence": 0.945,
+            "box_2d": {
+              "top": 0.36,
+              "left": 0.0,
+              "bottom": 0.736,
+              "right": 0.193
+            }
+          }
+        ],
+        "rotationApplied": 90
+      },
+      {
+        "sessionId": "8402bd2f-42c9-4029-9311-0f7d456a6f2d",
+        "streamId": "b094e8cf-788c-4f4f-bc57-1a810a013eaa",
+        "frameId": 339,
+        "captureUptimeMs": 362513537,
+        "width": 480,
+        "height": 640,
+        "engine": "GEMINI/gemini-3.1-flash-lite",
+        "status": "SUCCESS",
+        "inferenceMs": 3653,
+        "sourceAgeMs": 3673,
+        "detections": [
+          {
+            "label": "Apple",
+            "confidence": 0.985,
+            "box_2d": {
+              "top": 0.411,
+              "left": 0.262,
+              "bottom": 0.617,
+              "right": 0.556
+            }
+          },
+          {
+            "label": "Apple",
+            "confidence": 0.972,
+            "box_2d": {
+              "top": 0.367,
+              "left": 0.518,
+              "bottom": 0.597,
+              "right": 0.753
+            }
+          },
+          {
+            "label": "Orange",
+            "confidence": 0.964,
+            "box_2d": {
+              "top": 0.314,
+              "left": 0.433,
+              "bottom": 0.452,
+              "right": 0.588
+            }
+          },
+          {
+            "label": "Orange",
+            "confidence": 0.958,
+            "box_2d": {
+              "top": 0.581,
+              "left": 0.383,
+              "bottom": 0.684,
+              "right": 0.628
+            }
+          },
+          {
+            "label": "Orange",
+            "confidence": 0.941,
+            "box_2d": {
+              "top": 0.564,
+              "left": 0.617,
+              "bottom": 0.664,
+              "right": 0.816
+            }
+          },
+          {
+            "label": "Orange",
+            "confidence": 0.925,
+            "box_2d": {
+              "top": 0.62,
+              "left": 0.354,
+              "bottom": 0.724,
+              "right": 0.518
+            }
+          }
+        ],
+        "rotationApplied": 90
+      }
+    ],
+    "note": "Physical camera scenes before subsequent UI and voice refinements; final-build validation is separately recorded in the handover.",
+    "refinedGuideNoFoodCheck": {
+      "note": "Actual dark/covered camera input; no expected identity supplied. Refined build restored Camera role and reconnected automatically. Empty result reached Cook; not a positive food-recognition check.",
+      "observation": {
+        "sessionId": "8402bd2f-42c9-4029-9311-0f7d456a6f2d",
+        "streamId": "59282c26-d9c7-4610-b493-1d8a5b9354c2",
+        "frameId": 421,
+        "captureUptimeMs": 367317684,
+        "width": 480,
+        "height": 640,
+        "engine": "GEMINI/gemini-3.1-flash-lite",
+        "status": "SUCCESS",
+        "inferenceMs": 4244,
+        "sourceAgeMs": 4284,
+        "rotationApplied": 90
+      }
+    }
+  },
+  "latestSoftwareBuild": {
+    "apkSha256": "9a37e98feb4f3641947cfaa521a786510ac6d248c34e95f7d9dd5ece1f069c07",
+    "installedOnPhones": false,
+    "reason": "User intentionally disconnected both phones before the final UI and request-ownership changes.",
+    "jvmTests": 49,
+    "pythonTests": 21,
+    "androidTestsLastPhysicalPass": 7,
+    "figmaDesign": "https://www.figma.com/design/Zcx3aNpssrtaWoefR8OLJJ",
+    "hardwareScaleAvailable": false
+  }
 }

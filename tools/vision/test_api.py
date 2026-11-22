@@ -30,6 +30,22 @@ class ApiTests(unittest.TestCase):
   with patch('vision_api.infer',return_value=self.result()):
    self.request();changed={**self.body,'imageBase64':base64.b64encode(b'different').decode()}
    self.assertEqual((409,'FRAME_ID_CONFLICT'),(lambda r:(r[0],r[1]['status']))(self.request(changed)))
+ def test_request_id_tracks_each_caller_without_repeating_inference(self):
+  with patch('vision_api.infer',return_value=self.result()) as backend:
+   first={**self.body,'requestId':'scan-one'}
+   self.assertEqual('scan-one',self.request(first)[1]['requestId'])
+   self.assertEqual('scan-two',self.request({**first,'requestId':'scan-two'})[1]['requestId'])
+   self.assertNotIn('requestId',self.request()[1])
+   self.assertEqual(1,backend.call_count)
+   self.assertEqual(4,len(backend.call_args.args)) # Correlation is not sent to the model.
+ def test_invalid_request_id_does_not_reach_provider(self):
+  with patch('vision_api.infer') as backend:
+   for request_id in ['', 'x'*129, 3, True, {}]:
+    self.assertEqual(400,self.request({**self.body,'requestId':request_id})[0])
+   backend.assert_not_called()
+ def test_failed_analysis_retains_optional_request_id(self):
+  with patch('vision_api.infer',side_effect=VisionError('NETWORK_UNAVAILABLE',503)):
+   self.assertEqual('scan-one',self.request({**self.body,'requestId':'scan-one'})[1]['requestId'])
  def test_expired_replay_not_run_again(self):
   with patch('vision_api.infer',return_value=self.result()) as backend:
    self.request();k=('s','g',1);digest,result,completed=Handler.cache[k];Handler.cache[k]=(digest,result,completed-20)

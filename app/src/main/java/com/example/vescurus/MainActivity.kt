@@ -65,7 +65,7 @@ enum class Screen {
 fun VESCURUSApp() {
     val context=LocalContext.current
     val prefs=remember { context.getSharedPreferences("vescurus",0) }
-    var selectedRole by rememberSaveable { mutableStateOf(runCatching { Role.valueOf(prefs.getString("role","NONE")!!) }.getOrDefault(Role.NONE)) }
+    var selectedRole by rememberSaveable { mutableStateOf(runCatching { Role.valueOf(prefs.getString("role","NONE")!!) }.getOrDefault(Role.NONE).takeIf { it == Role.GUIDE || it == Role.COOK } ?: Role.NONE) }
     // Keep the branded entrance on a fresh launch, then resume the saved phone role.
     // Saved screen state still prevents replaying it on an activity recreation.
     var currentScreen by rememberSaveable { mutableStateOf(Screen.Splash) }

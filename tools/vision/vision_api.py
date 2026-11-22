@@ -12,6 +12,8 @@ from PIL import Image, ImageOps
 ROOT = Path(__file__).resolve().parents[2]
 ASSETS = ROOT / 'app/src/main/assets'
 MAX_BODY = 3_000_000
+PREPARATIONS = frozenset(('raw', 'whole', 'peeled', 'sliced', 'diced', 'julienne', 'brunoise',
+                          'chopped', 'grated', 'mashed', 'fried'))
 
 class VisionError(Exception):
     def __init__(self, status: str, http_status: int = 502):
@@ -58,6 +60,11 @@ def parse_response(text):
                 raise ValueError()
             result.append({'label': label, 'confidence': o['confidence'], 'supported': o['is_supported'],
                            'box_2d': dict(zip(('top','left','bottom','right'), [v/1000 for v in b]))})
+            preparation = o.get('preparation')
+            if isinstance(preparation, str) and o['is_supported']:
+                preparation = preparation.strip().lower()
+                if len(preparation) <= 24 and preparation in PREPARATIONS:
+                    result[-1]['preparation'] = preparation
         return result
     except (ValueError, KeyError, TypeError, AttributeError):
         raise VisionError('MALFORMED_RESPONSE') from None
@@ -171,6 +178,10 @@ class Handler(BaseHTTPRequestHandler):
             for field in ('sessionId','streamId'):
                 if not isinstance(body[field],str) or not 1 <= len(body[field]) <= 128: raise ValueError()
             context = {k: body[k] for k in ('sessionId','streamId','frameId')}
+            request_id = body.get('requestId')
+            if request_id is not None:
+                if not isinstance(request_id,str) or not 1 <= len(request_id) <= 128: raise ValueError()
+                context['requestId'] = request_id
             data = base64.b64decode(body['imageBase64'], validate=True)
             identity = (body['sessionId'],body['streamId'],frame_id)
             stream = identity[:2]
@@ -179,12 +190,15 @@ class Handler(BaseHTTPRequestHandler):
                 cached_digest, cached, completed = self.cache[identity]
                 if digest != cached_digest: raise VisionError('FRAME_ID_CONFLICT',409)
                 result = dict(cached)
+                result.pop('requestId', None)
+                if request_id is not None: result['requestId'] = request_id
                 result['sourceAgeMs'] += round((time.monotonic()-completed)*1000)
                 if result['sourceAgeMs'] >= 15000: raise VisionError('OBSERVATION_EXPIRED',410)
                 return self.reply(200,result)
             if frame_id <= self.stream_frames.get(stream,0): raise VisionError('OBSOLETE_FRAME',409)
             if time.monotonic() < self.next_allowed_at: raise VisionError('PROVIDER_COOLDOWN',429)
             result = infer(data,body['sessionId'],body['streamId'],frame_id)
+            if request_id is not None: result = {**result, 'requestId':request_id}
             type(self).cache[identity] = (digest,result,time.monotonic())
             while len(self.cache)>8:self.cache.popitem(last=False)
             type(self).stream_frames[stream] = frame_id

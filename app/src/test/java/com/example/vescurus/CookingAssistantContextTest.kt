@@ -67,4 +67,12 @@ class CookingAssistantContextTest {
         assertTrue(prompt.contains("Question-9-end"))
         assertTrue(prompt.contains("Question-20-end"))
     }
+    @Test fun savedPlanningNotesSurviveRecognitionConversationChurn() {
+        val state=CookingSession(planningNotes=listOf("No dairy, please", "Serve within 20 minutes"))
+        val scans=(1..20).map { ChatMessage("Assistant","Identified ingredient $it") }
+        val prompt=cookingAssistantPrompt(state,scans)
+        assertTrue(prompt.contains("No dairy, please"))
+        assertTrue(prompt.contains("Serve within 20 minutes"))
+        assertTrue(prompt.contains("honor the latest correction"))
+    }
 }

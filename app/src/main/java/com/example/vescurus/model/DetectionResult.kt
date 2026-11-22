@@ -13,7 +13,8 @@ data class DetectionResult(
     val confidence: Float,
     val recipe_class: Int = 0,
     val box_2d: BoundingBox,
-    val supported: Boolean = true
+    val supported: Boolean = true,
+    val preparation: String? = null
 )
 
 @Serializable

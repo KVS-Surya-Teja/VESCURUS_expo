@@ -12,6 +12,11 @@
           "confidence": {
             "type": "NUMBER"
           },
+          "preparation": {
+            "type": "STRING",
+            "nullable": true,
+            "enum": ["raw", "whole", "peeled", "sliced", "diced", "julienne", "brunoise", "chopped", "grated", "mashed", "fried", "unknown"]
+          },
           "box_2d": {
             "type": "ARRAY",
             "items": {

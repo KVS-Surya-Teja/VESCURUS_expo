@@ -27,6 +27,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -57,72 +60,74 @@ import java.util.concurrent.atomic.AtomicLong
  * when null a solid-black placeholder is shown (used in Compose Preview).
  */
 @Composable
-fun GuideContent(status: ConnectionStatus,diagnostics: String,detections: List<DetectionResult>,onBack: ()->Unit={},cameraSlot: (@Composable ()->Unit)?=null) {
+fun GuideContent(status: ConnectionStatus, diagnostics: String, detections: List<DetectionResult>,
+    onBack: () -> Unit = {}, cameraSlot: (@Composable () -> Unit)? = null,
+    onRecognize: () -> Unit = {}, recognizing: Boolean = false,
+    observation: com.example.vescurus.model.Observation? = null) {
     var showPairing by rememberSaveable { mutableStateOf(false) }
     val pairingCode = remember(diagnostics) { Regex("""Pairing code:\s*(\d{6})""").find(diagnostics)?.groupValues?.get(1) }
-    val cookContext = remember(diagnostics) {
-        diagnostics.lineSequence().firstOrNull { it.startsWith("Cook: ") }?.removePrefix("Cook: ")
-    }
     val connected = status == ConnectionStatus.CONNECTED
-    val connectionTitle = when (status) {
-        ConnectionStatus.CONNECTED -> "Cook connected"
-        ConnectionStatus.SEARCHING -> "Ready to connect"
-        ConnectionStatus.DISCONNECTED, ConnectionStatus.LOST -> "Cook disconnected"
-        ConnectionStatus.FOUND, ConnectionStatus.CONNECTING, ConnectionStatus.RECONNECTING -> "Connecting to Cook…"
-        else -> "Starting Guide"
+    val names = observation?.takeIf { it.status == "SUCCESS" }?.detections.orEmpty()
+        .filter { it.supported && it.confidence >= .5f }.map { it.label }.distinct()
+    val hint = when {
+        recognizing -> "Looking at your food…"
+        observation?.status == "POOR_IMAGE" -> "Move closer and use better lighting."
+        observation?.status == "QUOTA_OR_RATE_LIMIT" -> "Please wait a minute, then try again."
+        observation?.status == "TIMEOUT" -> "That took too long. Try again."
+        observation?.status == "NETWORK_UNAVAILABLE" -> "Check internet, then try again."
+        observation?.status in listOf("UNCONFIGURED", "CREDENTIAL_FAILURE", "MODEL_UNAVAILABLE", "ON_DEVICE_UNAVAILABLE") -> "Food recognition is unavailable right now."
+        observation?.status == "SUCCESS" && names.isEmpty() -> "No food found. Try a clearer view."
+        names.isNotEmpty() -> names.joinToString(" · ")
+        observation != null -> "Couldn't recognize this view. Try again."
+        else -> if(connected) "Aim at one ingredient and keep steady." else "Connect the cooking phone to begin."
     }
     if (showPairing) GuidePairingDialog(diagnostics, pairingCode) { showPairing = false }
-
     BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
         val landscape = maxWidth > maxHeight
         cameraSlot?.invoke()
-        Box(
-            Modifier.align(Alignment.TopCenter).fillMaxWidth().height(if (landscape) 0.dp else 84.dp)
-                .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = .72f), Color.Transparent)))
-        )
-        IconButton(onClick = onBack, modifier = Modifier.padding(12.dp).align(Alignment.TopStart).background(Color.Black.copy(alpha = .55f), CircleShape)) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Switch role", tint = Color.White)
+        Box(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(90.dp)
+            .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = .65f), Color.Transparent))))
+        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack, modifier = Modifier.background(Color.Black.copy(alpha = .4f), CircleShape)) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Choose how to use this phone", tint = Color.White)
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("Guide camera", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                Text("Point. Hold steady. Cook does the rest.", color = Color.White.copy(alpha = .7f), fontSize = 11.sp,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
         }
-        if (!landscape) Column(Modifier.align(Alignment.TopCenter).padding(top = 15.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("VESCURUS", color = GoldPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
-            Text("Guide camera", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
-        }
-        Surface(
-            modifier = Modifier.align(if (landscape) Alignment.BottomEnd else Alignment.BottomCenter)
-                .padding(12.dp).then(if (landscape) Modifier.width(300.dp) else Modifier.fillMaxWidth()),
-            color = Color(0xFF0B1422).copy(alpha = .94f), shape = RoundedCornerShape(20.dp),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = .12f))
-        ) {
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Box(Modifier.size(7.dp).background(if (connected) Color(0xFF6EE7B7) else GoldPrimary, CircleShape))
-                    Text(connectionTitle, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                }
-                Text(
-                    if (connected) cookContext ?: "Keep your ingredients in view." else "Connect your Cook phone on the same Wi-Fi or hotspot.",
-                    color = Color(0xFFB6C3D4), fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis
-                )
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                    if (pairingCode != null) Text("Code $pairingCode", color = GoldPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                    else Spacer(Modifier.width(1.dp))
-                    TextButton(onClick = { showPairing = true }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
-                        Text("Pairing details", color = GoldPrimary, fontSize = 12.sp)
+        Surface(modifier = Modifier.align(if (landscape) Alignment.BottomEnd else Alignment.BottomCenter)
+                .padding(16.dp).then(if (landscape) Modifier.width(300.dp) else Modifier.fillMaxWidth())
+                .heightIn(max = (maxHeight - 32.dp).coerceAtLeast(120.dp)),
+            color = if(connected) Color.Black.copy(alpha = .55f) else Color(0xFF0B1422).copy(alpha = .95f), shape = RoundedCornerShape(22.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Box(Modifier.size(7.dp).background(if (connected) Color(0xFF6EE7B7) else GoldPrimary, CircleShape))
+                        Text(if (connected) "Cook controls this camera" else "Waiting for your cooking phone", color = Color.White, fontSize = 13.sp,
+                            maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
+                    if (!connected) TextButton(onClick = { showPairing = true }) { Text("Connect", fontSize = 12.sp) }
                 }
+                Text(hint, color = Color(0xFFCBD5E1), fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                if (recognizing) LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = GoldPrimary)
             }
         }
     }
 }
 
 @Composable
-private fun GuidePairingDialog(diagnostics: String, pairingCode: String?, onDismiss: () -> Unit) {
+internal fun GuidePairingDialog(diagnostics: String, pairingCode: String?, onDismiss: () -> Unit) {
     val address = remember(diagnostics) { Regex("""\b(?:\d{1,3}\.){3}\d{1,3}:\d{1,5}\b""").find(diagnostics)?.value }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Connect your Cook phone") },
+        title = { Text("Connect your cooking phone") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text("On the other phone, open Cook and choose Connect Guide.")
+                Text("On your cooking phone, tap Connect and enter these details.")
                 if (pairingCode != null) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("Pairing code", fontSize = 12.sp)
@@ -131,11 +136,12 @@ private fun GuidePairingDialog(diagnostics: String, pairingCode: String?, onDism
                 }
                 if (address != null) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("Guide address", fontSize = 12.sp)
-                        Text(address, fontWeight = FontWeight.SemiBold)
+                        Text("Camera address", fontSize = 12.sp)
+                        Text(address.substringBeforeLast(":"), fontWeight = FontWeight.SemiBold)
+                        if(address.substringAfterLast(":")!="8766") Text("Port ${address.substringAfterLast(":")}", fontSize=12.sp)
                     }
-                } else if (diagnostics.isNotBlank()) {
-                    Text(diagnostics, fontSize = 12.sp)
+                } else {
+                    Text("Still finding this phone's address. Check Wi-Fi and reopen these details.", fontSize = 12.sp)
                 }
                 Text("Keep both phones on the same Wi-Fi or hotspot.", fontSize = 12.sp)
             }
@@ -159,7 +165,9 @@ fun GuideScreen(
     observation: com.example.vescurus.model.Observation? = null,
     sessionId: String = "unpaired",
     onObservation: (com.example.vescurus.model.Observation) -> Unit = {},
-    onVideoAvailable: (com.example.vescurus.model.VideoFrame) -> Unit = {}
+    onVideoAvailable: (com.example.vescurus.model.VideoFrame) -> Unit = {},
+    remoteAnalysisRequest: Long = 0,
+    remoteAnalysisRequestId: String? = null
 ) {
     val context = LocalContext.current
     var hasCameraPermission by remember {
@@ -173,8 +181,16 @@ fun GuideScreen(
 
     val detector = remember { GeminiIngredientDetector() }
     var analyzing by remember { mutableStateOf(false) }
-    var automatic by rememberSaveable { mutableStateOf(false) }
+    val automatic = false
     var analysisRequest by remember { mutableIntStateOf(0) }
+    // Requests belong to the currently paired session and are never replayed on reopening.
+    var consumedRemoteRequest by remember { mutableLongStateOf(remoteAnalysisRequest) }
+    LaunchedEffect(remoteAnalysisRequest) {
+        if(remoteAnalysisRequest != consumedRemoteRequest) {
+            consumedRemoteRequest=remoteAnalysisRequest
+            if(hasCameraPermission) analysisRequest++
+        }
+    }
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
@@ -188,10 +204,11 @@ fun GuideScreen(
     if (!hasCameraPermission) {
         Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(text = "Camera Permission Required", color = Color.White, fontSize = 16.sp)
+                Text(text = "Use the camera to recognize your food", color = Color.White, fontSize = 16.sp,
+                    modifier = Modifier.padding(horizontal = 24.dp), textAlign = TextAlign.Center)
                 Spacer(modifier = Modifier.height(16.dp))
                 Button(onClick = { launcher.launch(Manifest.permission.CAMERA) }) {
-                    Text("Grant Permission")
+                    Text("Allow camera")
                 }
             }
         }
@@ -201,6 +218,7 @@ fun GuideScreen(
     GuideContent(
         status = status,
         diagnostics = diagnostics,
+        onRecognize = { analysisRequest++ }, recognizing = analyzing, observation = observation,
         detections = emptyList(),
         onBack = onBack,
         cameraSlot = {
@@ -213,35 +231,11 @@ fun GuideScreen(
                 onVideoAvailable = onVideoAvailable,
                 automatic = automatic,
                 analysisRequest = analysisRequest,
+                analysisRequestId = remoteAnalysisRequestId,
                 streamingEnabled = status == ConnectionStatus.CONNECTED,
                 onAnalysisState = { analyzing=it }
             )
-            val landscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
-            Column(Modifier.fillMaxWidth().padding(top = if (landscape) 8.dp else 82.dp, start = if (landscape) 76.dp else 12.dp, end = 12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = { analysisRequest++ }, enabled = !analyzing, modifier = Modifier.testTag("analyze-scene"),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = Color(0xFF111827),
-                            disabledContainerColor = Color(0xFFE0B54F), disabledContentColor = Color(0xFF111827))
-                    ) {
-                        if (analyzing) {
-                            CircularProgressIndicator(Modifier.size(14.dp), color = Color(0xFF111827), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(8.dp))
-                        }
-                        Text(if (analyzing) "Analyzing…" else "Analyze scene", fontWeight = FontWeight.SemiBold)
-                    }
-                    Surface(color = Color(0xFF0B1422).copy(alpha = .9f), shape = RoundedCornerShape(14.dp)) {
-                        Row(Modifier.padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("Auto", color = Color.White, fontSize = 12.sp)
-                            Switch(automatic, { automatic = it }, modifier = Modifier.testTag("auto-analysis"),
-                                colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF111827), checkedTrackColor = GoldPrimary))
-                        }
-                    }
-                }
-                Spacer(Modifier.height(10.dp))
-                ObservationPanel(observation, Modifier.width(if (landscape) 180.dp else 150.dp).height(if (landscape) 120.dp else 190.dp), isAnalyzing = analyzing)
-            }
+
         }
     )
 }
@@ -256,6 +250,7 @@ fun CameraPreview(
     onVideoAvailable: (com.example.vescurus.model.VideoFrame) -> Unit = {},
     automatic: Boolean = true,
     analysisRequest: Int = 0,
+    analysisRequestId: String? = null,
     streamingEnabled: Boolean = true,
     onAnalysisState: (Boolean) -> Unit = {}
 ) {
@@ -271,6 +266,7 @@ fun CameraPreview(
     val videoCallback by rememberUpdatedState(onVideoAvailable)
     val autoEnabled by rememberUpdatedState(automatic)
     val manualRequest by rememberUpdatedState(analysisRequest)
+    val requestIdentity by rememberUpdatedState(analysisRequestId)
     val shouldStream by rememberUpdatedState(streamingEnabled)
     val analysisStateCallback by rememberUpdatedState(onAnalysisState)
     val consumedRequest=remember { AtomicInteger(0) }
@@ -312,6 +308,7 @@ fun CameraPreview(
                             lastAnalysis.set(now)
                             consumedRequest.set(manualRequest)
                             val capturedSession = session
+                            val capturedRequestId=requestIdentity
                             scope.launch(Dispatchers.IO) {
                                 scope.launch(Dispatchers.Main) { analysisStateCallback(true) }
                                 try {
@@ -341,7 +338,7 @@ fun CameraPreview(
                                     engine = com.example.vescurus.di.AppModule.engineDescription,
                                     status = status, inferenceMs = completed - start, sourceAgeMs = completed - now,
                                     jpegBase64 = android.util.Base64.encodeToString(output.toByteArray(), android.util.Base64.NO_WRAP),
-                                    detections = results, rotationApplied = rotation, message = message)
+                                    detections = results, rotationApplied = rotation, message = message, requestId=capturedRequestId)
                                 Log.d("CV_FLOW", "complete frame=$id status=$status latency=${completed-start}ms")
                                 if (!disposed.get() && capturedSession == session) {
                                     com.example.vescurus.debug.VescurusLogger.retainObservation(observation)

@@ -13,7 +13,8 @@ data class Observation(
     val engine: String, val status: String, val inferenceMs: Long, val sourceAgeMs: Long,
     val jpegBase64: String, val detections: List<DetectionResult> = emptyList(),
     val rotationApplied: Int = 0, val mirrored: Boolean = false,
-    val coordinates: String = "normalized-yxyx-upright", val message: String? = null
+    val coordinates: String = "normalized-yxyx-upright", val message: String? = null,
+    val requestId: String? = null
 ) {
     fun valid(): Boolean = width in 1..4096 && height in 1..4096 && frameId > 0 &&
         inferenceMs >= 0 && sourceAgeMs >= 0 && coordinates == "normalized-yxyx-upright" && !mirrored &&
