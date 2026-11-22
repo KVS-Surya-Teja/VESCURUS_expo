@@ -2,6 +2,16 @@ package com.example.vescurus
 
 import android.app.Application
 import android.os.ParcelFileDescriptor
+import android.util.Log
+import android.view.accessibility.AccessibilityNodeInfo
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.unit.dp
@@ -22,16 +32,34 @@ import java.io.File
 @RunWith(AndroidJUnit4::class)
 class ExhibitionFlowTest {
     @get:Rule val compose=createComposeRule()
+    private fun reviewShell(command: String) {
+        val automation=InstrumentationRegistry.getInstrumentation().uiAutomation
+        ParcelFileDescriptor.AutoCloseInputStream(automation.executeShellCommand(command)).use { it.readBytes() }
+    }
+    private fun pixelLauncherAnrVisible(): Boolean {
+        fun containsTitle(node: AccessibilityNodeInfo): Boolean {
+            val text=node.text?.toString()?.replace('\u2019','\'')?.replace(Regex("\\s+")," ")
+            if(text=="Pixel Launcher isn't responding")return true
+            return (0 until node.childCount).any { index -> node.getChild(index)?.let(::containsTitle)==true }
+        }
+        return InstrumentationRegistry.getInstrumentation().uiAutomation.rootInActiveWindow?.let(::containsTitle)==true
+    }
     private fun captureReview(name: String) {
         if(InstrumentationRegistry.getArguments().getString("uiReview")!="true")return
         compose.waitForIdle()
-        val instrumentation=InstrumentationRegistry.getInstrumentation()
         require(name.matches(Regex("[a-z-]+")))
+        reviewShell("mkdir -p /sdcard/Download/vescurus-ui")
+        if(InstrumentationRegistry.getArguments().getString("clearPixelLauncherAnr")=="true" && pixelLauncherAnrVisible()) {
+            // Preserve the obstruction as evidence; never dismiss an app ANR or other dialog.
+            reviewShell("screencap -p /sdcard/Download/vescurus-ui/$name-launcher-anr.png")
+            Log.w("VescurusUiReview","Known Pixel Launcher ANR obstructed $name; stopping only com.google.android.apps.nexuslauncher")
+            reviewShell("am force-stop com.google.android.apps.nexuslauncher")
+            compose.waitUntil(5000) { !pixelLauncherAnrVisible() }
+            compose.waitForIdle()
+        }
         // Connected tests can uninstall the app before the workflow collects artifacts.
         // The CI-only shell capture survives that cleanup and contains isolated UI fixtures.
-        listOf("mkdir -p /sdcard/Download/vescurus-ui", "screencap -p /sdcard/Download/vescurus-ui/$name.png").forEach { command ->
-            ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand(command)).use { it.readBytes() }
-        }
+        reviewShell("screencap -p /sdcard/Download/vescurus-ui/$name.png")
     }
     @Test fun nonEggSessionCompletesAndSurvivesPhoneStorageReload() {
         val app=InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as Application
@@ -87,14 +115,17 @@ class ExhibitionFlowTest {
         InstrumentationRegistry.getInstrumentation().runOnMainSync { vm=CookViewModel(app,dir) }
         compose.setContent {
             VESCURUSTheme {
-                CookScreen(
-                    status=ConnectionStatus.IDLE,
-                    diagnostics="No peer connected",
-                    detections=emptyList(),
-                    latestFrame=null,
-                    viewModel=vm,
-                    onSnapshot={}
-                )
+                // Match the shell's safe content area without starting its peer connection.
+                Box(Modifier.fillMaxSize().background(Color(0xFF020617)).windowInsetsPadding(WindowInsets.safeDrawing)) {
+                    CookScreen(
+                        status=ConnectionStatus.IDLE,
+                        diagnostics="No peer connected",
+                        detections=emptyList(),
+                        latestFrame=null,
+                        viewModel=vm,
+                        onSnapshot={}
+                    )
+                }
             }
         }
         compose.waitUntil(15000) { !vm.isLoading }
