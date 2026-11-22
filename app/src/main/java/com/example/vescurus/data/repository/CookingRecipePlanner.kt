@@ -2,16 +2,11 @@ package com.example.vescurus.data.repository
 
 import com.example.vescurus.BuildConfig
 import com.example.vescurus.model.Recipe
-import com.example.vescurus.model.RecipeStep
-import com.example.vescurus.model.RecipeTarget
 import com.example.vescurus.session.CookingSession
 import com.example.vescurus.session.EntryStatus
 import com.example.vescurus.ui.ChatMessage
 import com.example.vescurus.data.network.GeminiTextService
 import org.json.JSONObject
-import java.util.UUID
-
-class RecipePlanningQuestion(val question: String) : Exception("Recipe clarification required")
 
 /** Plans from confirmed records only; generated instructions are suggestions, never measurements. */
 class CookingRecipePlanner {
@@ -37,6 +32,7 @@ class CookingRecipePlanner {
             must be listed explicitly as optional pantry additions. Do not silently add a new primary ingredient.
             If milk, oil, butter or another item is essential in a substantial amount, it must already be confirmed;
             otherwise choose a different dish. Do not invent nutrition, external sources, URLs or measured amounts.
+            Do not label fruit or a dish sugar-free merely because no sugar is added; say no added sugar when applicable.
             Give clear safe cooking instructions with observable doneness cues; timings are estimates.
             Return JSON only, no Markdown, with this exact shape:
             {"name":"...","description":"...","servings":2,
@@ -46,58 +42,16 @@ class CookingRecipePlanner {
             Name at most 100 characters, description at most 600, each instruction at most 1000.
             If servings cannot reasonably be estimated, set servings to null.
             If confirmed foods conflict with dietary restrictions, available time or other requirements, or essential
-            primary ingredients/amounts are missing, do not manufacture a recipe. Instead return only
-            {"needsClarification":"one useful question, at most 400 characters"}.
+            primary ingredients/amounts are missing, do not manufacture a recipe. Return all required fields empty:
+            {"name":"","description":"","servings":null,"pantryAdditions":[],"steps":[],
+             "needsClarification":"one useful question, at most 400 characters"}.
             Confirmed ingredients: ${ingredients.joinToString(prefix = "[", postfix = "]")}
             Saved planning notes (honor the latest correction; questions are not confirmed measurements):
             ${session.planningNotes.joinToString("\n") { it.take(1500) }}
             Recent conversation:
             ${conversation.filter { it.sender != "System" }.takeLast(12).joinToString("\n") { "${it.sender}: ${it.message.take(2000)}" }}
         """.trimIndent()
-        val text = GeminiTextService().generate(prompt, jsonOutput = true)
-        require(text.length <= 35_000) { "Recipe response was too large." }
-        val json = JSONObject(text.trim())
-        if (json.has("needsClarification")) {
-            val question = json.getString("needsClarification").trim()
-            require(question.isNotBlank() && question.length <= 400) { "Invalid recipe clarification." }
-            throw RecipePlanningQuestion(question)
-        }
-        fun bounded(key: String, max: Int): String = json.getString(key).trim().also {
-            require(it.isNotBlank() && it.length <= max) { "Invalid recipe $key." }
-        }
-        val name = bounded("name", 100)
-        val description = bounded("description", 600)
-        val pantry = json.getJSONArray("pantryAdditions")
-        require(pantry.length() <= 8) { "Too many extra ingredients." }
-        val extras = (0 until pantry.length()).map { index ->
-            pantry.getString(index).trim().also { require(it.isNotEmpty() && it.length <= 200) }
-        }
-        val instructions = json.getJSONArray("steps")
-        require(instructions.length() in 3..20) { "Invalid recipe step count." }
-        var elapsed = 0L
-        val steps = (0 until instructions.length()).map { index ->
-            val item = instructions.getJSONObject(index)
-            val instruction = item.getString("instruction").trim()
-            require(instruction.isNotBlank() && instruction.length <= 1000) { "Invalid recipe instruction." }
-            val seconds = item.getDouble("durationSeconds")
-            require(seconds.isFinite() && seconds % 1.0 == 0.0 && seconds in 10.0..3600.0) { "Invalid step duration." }
-            val start = elapsed
-            elapsed += seconds.toLong() * 1000
-            require(elapsed <= 10_800_000L) { "Recipe duration is too long." }
-            RecipeStep(start, elapsed, instruction, instruction)
-        }
-        val servings = if (json.isNull("servings")) null else json.getDouble("servings").also {
-            require(it.isFinite() && it % 1.0 == 0.0 && it in 1.0..20.0) { "Invalid serving count." }
-        }.toInt()
-        return Recipe(
-            id = "ai-${UUID.randomUUID()}", name = name,
-            description = description + if (extras.isEmpty()) "" else "\nOptional pantry additions: ${extras.joinToString("; ")}",
-            totalTimeMs = elapsed, steps = steps, servings = servings,
-            source = "AI-generated cooking suggestion", sourceUrl = null,
-            targets = entries.map { entry ->
-                RecipeTarget(entry.label, entry.quantity?.value, entry.quantity?.unit?.label.orEmpty(),
-                    entry.quantity?.let { "${it.value} ${it.unit.label} ${entry.label}" } ?: "${entry.label} — amount not recorded")
-            }
-        )
+        val text = GeminiTextService().generate(prompt, jsonOutput = true, responseSchema = recipeResponseSchema)
+        return RecipePlanningParser.parse(text, session)
     }
 }

@@ -32,13 +32,15 @@ class GeminiTextService {
             install(HttpTimeout) { requestTimeoutMillis = 40_000; connectTimeoutMillis = 10_000; socketTimeoutMillis = 40_000 }
         }
     }
-    suspend fun generate(prompt: String, jsonOutput: Boolean = false): String = withContext(Dispatchers.IO) {
+    suspend fun generate(prompt: String, jsonOutput: Boolean = false, responseSchema: String? = null): String = withContext(Dispatchers.IO) {
         if (BuildConfig.GEMINI_API_KEY.isBlank()) throw GeminiTextException("UNCONFIGURED")
         require(prompt.isNotBlank() && prompt.length <= 100_000) { "Invalid prompt length" }
         try {
             withTimeout(45_000) {
-                val config = JSONObject().put("temperature", if (jsonOutput) .3 else .5).put("maxOutputTokens", 8192)
-                if (jsonOutput) config.put("responseMimeType", "application/json")
+                val structuredOutput = jsonOutput || responseSchema != null
+                val config = JSONObject().put("temperature", if (structuredOutput) .3 else .5).put("maxOutputTokens", if (structuredOutput) 8192 else 1024)
+                if (structuredOutput) config.put("responseMimeType", "application/json")
+                if (responseSchema != null) config.put("responseSchema", JSONObject(responseSchema))
                 val body = JSONObject().put("contents", JSONArray().put(JSONObject().put("role", "user")
                     .put("parts", JSONArray().put(JSONObject().put("text", prompt)))))
                     .put("generationConfig", config)
