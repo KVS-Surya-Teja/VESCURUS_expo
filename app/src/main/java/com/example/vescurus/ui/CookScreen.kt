@@ -13,6 +13,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -47,10 +51,9 @@ fun CookScreen(
 ) {
     var isVisionHudEnabled by remember { mutableStateOf(true) }
     var showDirectConnectDialog by remember { mutableStateOf(false) }
-    var ipInput by remember { mutableStateOf("192.168.43.1") }
+    var ipInput by remember { mutableStateOf("") }
     var portInput by remember { mutableStateOf("8080") }
 
-    // Collect all valid detected food items
     val detectedIngredients = remember(detections) {
         detections
             .filter { it.supported && it.confidence >= 0.50f }
@@ -59,28 +62,25 @@ fun CookScreen(
             .distinct()
     }
 
-    // Guard: only trigger once per IDLE state. LaunchedEffect re-runs when the
-    // detectedIngredients snapshot changes, but we guard on cookingState == IDLE
-    // so that repeated detections of the same ingredient do not re-invoke
-    // startRecipeSelection while the user is selecting a recipe or cooking.
-    // Using a stable key (detectedIngredients) means this re-evaluates when
-    // the detected set changes, but the state check prevents double-firing.
     LaunchedEffect(detectedIngredients) {
         if (detectedIngredients.isNotEmpty() && viewModel.cookingState == CookingState.IDLE) {
             viewModel.startRecipeSelection(detectedIngredients)
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(Color(0xFF020617))) {
-        // TOP HALF: Guide Video Feed
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF020617))
+    ) {
+        // TOP SECTION: Guide Video Feed Container
         Box(
             modifier = Modifier
-                .weight(if (viewModel.cookingState == CookingState.COOKING) 0.35f else 0.45f)
+                .weight(if (viewModel.cookingState == CookingState.COOKING) 0.36f else 0.44f)
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp))
                 .background(Color.Black)
         ) {
-            // REAL VIDEO FEED FROM GUIDE
             if (latestFrame != null) {
                 val bitmap = remember(latestFrame) {
                     android.graphics.BitmapFactory.decodeByteArray(latestFrame, 0, latestFrame.size)
@@ -88,19 +88,48 @@ fun CookScreen(
                 if (bitmap != null) {
                     Image(
                         bitmap = bitmap.asImageBitmap(),
-                        contentDescription = "Guide Feed",
+                        contentDescription = "Live Guide Feed",
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop
                     )
                 }
             } else {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        text = "WAITING FOR VIDEO...", 
-                        color = Color.White.copy(alpha = 0.2f), 
-                        fontSize = 10.sp,
-                        letterSpacing = 2.sp
-                    )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color(0xFF0F172A), Color(0xFF020617))
+                            )
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (status == ConnectionStatus.CONNECTED) Icons.Default.Wifi else Icons.Default.WifiOff,
+                            contentDescription = null,
+                            tint = if (status == ConnectionStatus.CONNECTED) GoldPrimary else Color.White.copy(alpha = 0.3f),
+                            modifier = Modifier.size(36.dp)
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = if (status == ConnectionStatus.CONNECTED) "WAITING FOR CAMERA FRAMES..." else "P2P TELEMETRY STANDBY",
+                            color = Color.White.copy(alpha = 0.45f),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 2.sp
+                        )
+                        Text(
+                            text = "Point Guide phone camera at the flat-tawa surface",
+                            color = Color.White.copy(alpha = 0.25f),
+                            fontSize = 10.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
                 }
             }
 
@@ -108,95 +137,188 @@ fun CookScreen(
                 DetectionOverlay(detections = detections)
             }
 
-            // Gradient Overlay for readability
-            Box(
+            // Top-Bar HUD Controls
+            Row(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(Color.Black.copy(alpha = 0.4f), Color.Transparent, Color.Black.copy(alpha = 0.4f))
-                        )
-                    )
-            )
-            
-            // Premium AI Vision HUD Toggle
-            Surface(
-                color = Color.Black.copy(alpha = 0.6f),
-                shape = RoundedCornerShape(20.dp),
-                modifier = Modifier.padding(12.dp).align(Alignment.TopEnd)
+                    .fillMaxWidth()
+                    .padding(12.dp)
+                    .align(Alignment.TopCenter),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                // Connection Status Chip
+                Surface(
+                    color = Color.Black.copy(alpha = 0.65f),
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f))
                 ) {
-                    Text(text = "AI HUD", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Switch(
-                        checked = isVisionHudEnabled,
-                        onCheckedChange = { isVisionHudEnabled = it },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = GoldPrimary,
-                            checkedTrackColor = GoldPrimary.copy(alpha = 0.4f)
-                        ),
-                        modifier = Modifier.scale(0.6f)
-                    )
-                }
-            }
-
-            // Connection Diagnostic Label & Direct Connect Trigger
-            if (status != ConnectionStatus.CONNECTED) {
-                Row(
-                    modifier = Modifier.align(Alignment.BottomStart).padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "STATUS: $diagnostics",
-                        color = Color.Yellow,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = { showDirectConnectDialog = true },
-                        modifier = Modifier.height(28.dp),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary)
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Connect IP", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(
+                                    when (status) {
+                                        ConnectionStatus.CONNECTED -> Color(0xFF22C55E)
+                                        ConnectionStatus.SEARCHING, ConnectionStatus.CONNECTING -> GoldPrimary
+                                        else -> Color(0xFFEF4444)
+                                    },
+                                    CircleShape
+                                )
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = when (status) {
+                                ConnectionStatus.CONNECTED -> "GUIDE SYNCED"
+                                ConnectionStatus.SEARCHING -> "DISCOVERING..."
+                                ConnectionStatus.CONNECTING -> "CONNECTING..."
+                                else -> "OFFLINE"
+                            },
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
+                        )
+                    }
+                }
+
+                // AI HUD Toggle Switch
+                Surface(
+                    color = Color.Black.copy(alpha = 0.65f),
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "AI HUD",
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Switch(
+                            checked = isVisionHudEnabled,
+                            onCheckedChange = { isVisionHudEnabled = it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = GoldPrimary,
+                                checkedTrackColor = GoldPrimary.copy(alpha = 0.4f)
+                            ),
+                            modifier = Modifier.scale(0.6f)
+                        )
                     }
                 }
             }
 
+            // Bottom Floating Bar: Quick IP Fallback trigger if not connected
+            if (status != ConnectionStatus.CONNECTED) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                        .align(Alignment.BottomCenter),
+                    color = Color(0xFF0F172A).copy(alpha = 0.90f),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.25f))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = null,
+                                tint = GoldPrimary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (diagnostics.isNotEmpty()) diagnostics.take(30) else "Searching via mDNS...",
+                                color = Color.White.copy(alpha = 0.8f),
+                                fontSize = 11.sp
+                            )
+                        }
+
+                        Button(
+                            onClick = { showDirectConnectDialog = true },
+                            modifier = Modifier.height(28.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Direct IP", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Black)
+                        }
+                    }
+                }
+            }
+
+            // Direct IP Connection Dialog
             if (showDirectConnectDialog) {
                 AlertDialog(
                     onDismissRequest = { showDirectConnectDialog = false },
-                    title = { Text("Direct IP Connection", color = Color.White) },
+                    title = {
+                        Text(
+                            text = "Direct Guide Link",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        )
+                    },
                     text = {
                         Column {
-                            Text("Enter the Guide's IP address and Port displayed on the Guide screen:", color = Color.LightGray, fontSize = 12.sp)
-                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Enter IP address and port displayed on the Guide phone screen:",
+                                color = Color.White.copy(alpha = 0.7f),
+                                fontSize = 13.sp
+                            )
+                            Spacer(modifier = Modifier.height(14.dp))
                             OutlinedTextField(
                                 value = ipInput,
                                 onValueChange = { ipInput = it },
-                                label = { Text("Guide IP") },
-                                singleLine = true
+                                label = { Text("Guide IP Address", color = GoldPrimary) },
+                                placeholder = { Text("e.g. 192.168.43.1", color = Color.Gray) },
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = GoldPrimary,
+                                    unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White
+                                )
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             OutlinedTextField(
                                 value = portInput,
                                 onValueChange = { portInput = it },
-                                label = { Text("Port") },
-                                singleLine = true
+                                label = { Text("Port", color = GoldPrimary) },
+                                placeholder = { Text("8080", color = Color.Gray) },
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = GoldPrimary,
+                                    unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White
+                                )
                             )
                         }
                     },
                     confirmButton = {
-                        Button(onClick = {
-                            val port = portInput.toIntOrNull() ?: 8080
-                            onDirectConnect(ipInput.trim(), port)
-                            showDirectConnectDialog = false
-                        }) {
-                            Text("Connect")
+                        Button(
+                            onClick = {
+                                val port = portInput.toIntOrNull() ?: 8080
+                                onDirectConnect(ipInput.trim(), port)
+                                showDirectConnectDialog = false
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Connect", color = Color.Black, fontWeight = FontWeight.Bold)
                         }
                     },
                     dismissButton = {
@@ -204,10 +326,11 @@ fun CookScreen(
                             Text("Cancel", color = Color.Gray)
                         }
                     },
-                    containerColor = Color(0xFF1E293B)
+                    containerColor = Color(0xFF0F172A),
+                    shape = RoundedCornerShape(16.dp)
                 )
             }
-            
+
             // Animated Countdown Overlay
             this@Column.AnimatedVisibility(
                 visible = viewModel.cookingState == CookingState.COUNTDOWN,
@@ -215,39 +338,45 @@ fun CookScreen(
                 exit = fadeOut() + scaleOut()
             ) {
                 Box(
-                    modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.7f)),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.75f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = viewModel.countdownValue.toString(),
-                        color = GoldPrimary,
-                        fontSize = 100.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "GET READY",
+                            color = Color.White.copy(alpha = 0.6f),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 4.sp
+                        )
+                        Text(
+                            text = viewModel.countdownValue.toString(),
+                            color = GoldPrimary,
+                            fontSize = 110.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
                 }
             }
         }
 
-        // BOTTOM HALF: Interactive Contextual Interface
+        // BOTTOM SECTION: Interactive Chef Interface
         Box(
             modifier = Modifier
-                .weight(if (viewModel.cookingState == CookingState.COOKING) 0.65f else 0.55f)
+                .weight(if (viewModel.cookingState == CookingState.COOKING) 0.64f else 0.56f)
                 .fillMaxWidth()
         ) {
-            Crossfade(targetState = viewModel.cookingState, label = "InterfaceTransition") { state ->
+            Crossfade(
+                targetState = viewModel.cookingState,
+                label = "InterfaceTransition"
+            ) { state ->
                 when (state) {
                     CookingState.IDLE -> {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                CircularProgressIndicator(color = GoldPrimary, modifier = Modifier.size(32.dp))
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Text(
-                                    text = "Scan any ingredients to begin...",
-                                    color = Color.Gray,
-                                    fontSize = 14.sp
-                                )
-                            }
-                        }
+                        ChefStandbyView(onManualTrigger = {
+                            viewModel.startRecipeSelection(listOf("Egg"))
+                        })
                     }
                     CookingState.RECIPE_SELECTION -> {
                         RecipeSelectionView(viewModel, detectedIngredients)
@@ -268,41 +397,140 @@ fun CookScreen(
 }
 
 @Composable
+fun ChefStandbyView(onManualTrigger: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = GoldPrimary.copy(alpha = 0.12f),
+                modifier = Modifier.size(72.dp),
+                border = BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.3f))
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(
+                        color = GoldPrimary,
+                        strokeWidth = 3.dp,
+                        modifier = Modifier.size(44.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Text(
+                text = "Scanning Cooking Surface",
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Text(
+                text = "Present eggs, oil, or ingredients in Guide's view to generate tawa recipes.",
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center,
+                lineHeight = 18.sp
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Quick Demo fallback button: lets reviewer explore V0 recipes immediately
+            OutlinedButton(
+                onClick = onManualTrigger,
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.4f)),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = GoldPrimary)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Demo Flat-Tawa Recipes (Egg)",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun RecipeSelectionView(viewModel: CookViewModel, detectedIngredients: List<String>) {
     val availableRecipes by viewModel.availableRecipes.collectAsState()
     val isFetching = viewModel.isFetchingRecipes
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                color = GoldPrimary.copy(alpha = 0.15f),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text(
+                    text = if (detectedIngredients.isNotEmpty()) "DETECTED: ${detectedIngredients.joinToString(", ").uppercase()}" else "TAWA RECIPES",
+                    color = GoldPrimary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.sp,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
+
+            Text(
+                text = "${availableRecipes.size} DISHES",
+                color = Color.White.copy(alpha = 0.5f),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
         Text(
-            text = if (detectedIngredients.isNotEmpty()) "DETECTED: ${detectedIngredients.joinToString(", ").uppercase()}" else "UNIVERSAL RECIPES",
-            color = GoldPrimary,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Black,
-            letterSpacing = 2.sp
-        )
-        Text(
-            text = if (isFetching) "Generating Custom Recipes..." else "What would you like to cook?",
+            text = if (isFetching) "Generating Custom Recipes..." else "Select a Dish to Cook",
             color = Color.White,
             fontSize = 20.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 12.dp)
+            fontWeight = FontWeight.Bold
         )
+
+        Spacer(modifier = Modifier.height(12.dp))
 
         if (isFetching) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(180.dp),
+                    .height(200.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator(color = GoldPrimary, modifier = Modifier.size(36.dp))
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = "Chef Gemini is crafting step-by-step timelines...",
+                        text = "Curating flat-tawa cooking timelines...",
                         color = Color.Gray,
-                        fontSize = 13.sp,
-                        textAlign = TextAlign.Center
+                        fontSize = 13.sp
                     )
                 }
             }
@@ -320,15 +548,23 @@ fun RecipeSelectionView(viewModel: CookViewModel, detectedIngredients: List<Stri
                 }
             }
         }
-        
+
         AnimatedVisibility(visible = viewModel.selectedRecipe != null && !isFetching) {
             Button(
                 onClick = { viewModel.startCooking() },
-                modifier = Modifier.fillMaxWidth().padding(top = 16.dp).height(56.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp)
+                    .height(54.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E)),
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(14.dp)
             ) {
-                Text(text = "START COOKING", color = Color.Black, fontWeight = FontWeight.Black)
+                Text(
+                    text = "START COOKING TIMELINE",
+                    color = Color.Black,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 1.sp
+                )
             }
         }
     }
@@ -337,10 +573,15 @@ fun RecipeSelectionView(viewModel: CookViewModel, detectedIngredients: List<Stri
 @Composable
 fun RecipeSelectionCard(recipe: Recipe, isSelected: Boolean, onClick: () -> Unit) {
     Surface(
-        modifier = Modifier.fillMaxWidth().clickable { onClick() },
-        color = if (isSelected) Color(0xFF14532D) else Color(0xFF1E293B),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        color = if (isSelected) Color(0xFF14532D) else Color(0xFF0F172A),
         shape = RoundedCornerShape(16.dp),
-        border = if (isSelected) BorderStroke(2.dp, Color(0xFF22C55E)) else null
+        border = BorderStroke(
+            width = if (isSelected) 2.dp else 1.dp,
+            color = if (isSelected) Color(0xFF22C55E) else Color.White.copy(alpha = 0.08f)
+        )
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
@@ -350,10 +591,17 @@ fun RecipeSelectionCard(recipe: Recipe, isSelected: Boolean, onClick: () -> Unit
                 SubcomposeAsyncImage(
                     model = recipe.thumbnailUrl,
                     contentDescription = recipe.name,
-                    modifier = Modifier.size(64.dp).clip(RoundedCornerShape(10.dp)),
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clip(RoundedCornerShape(12.dp)),
                     contentScale = ContentScale.Crop,
                     loading = {
-                        Box(modifier = Modifier.fillMaxSize().background(Color.DarkGray), contentAlignment = Alignment.Center) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.DarkGray),
+                            contentAlignment = Alignment.Center
+                        ) {
                             CircularProgressIndicator(color = GoldPrimary, modifier = Modifier.size(20.dp))
                         }
                     },
@@ -370,31 +618,42 @@ fun RecipeSelectionCard(recipe: Recipe, isSelected: Boolean, onClick: () -> Unit
                 Image(
                     painter = painterResource(id = recipe.thumbnail),
                     contentDescription = null,
-                    modifier = Modifier.size(64.dp).clip(RoundedCornerShape(10.dp)),
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clip(RoundedCornerShape(12.dp)),
                     contentScale = ContentScale.Crop
                 )
             }
-            Spacer(modifier = Modifier.width(16.dp))
+
+            Spacer(modifier = Modifier.width(14.dp))
+
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = recipe.name,
                     color = Color.White,
-                    fontSize = 16.sp,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
                     text = recipe.description,
-                    color = Color.Gray,
+                    color = Color.White.copy(alpha = 0.6f),
                     fontSize = 12.sp,
                     maxLines = 1
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "${recipe.totalTimeMs / 60000} MINS • ${recipe.calories} KCAL • ${recipe.proteinG.toInt()}g PRO",
-                    color = GoldPrimary,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "${recipe.totalTimeMs / 60000} MINS",
+                        color = GoldPrimary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = " • ${recipe.calories} KCAL • ${recipe.proteinG.toInt()}g PRO",
+                        color = Color.White.copy(alpha = 0.5f),
+                        fontSize = 11.sp
+                    )
+                }
             }
         }
     }
@@ -406,7 +665,6 @@ fun CookingActiveWorkflow(viewModel: CookViewModel) {
     var chatInput by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
-    // Scroll to current active step automatically
     LaunchedEffect(viewModel.currentProgressMs) {
         val activeIndex = recipe.steps.indexOfFirst { 
             viewModel.currentProgressMs >= it.startTimeMs && viewModel.currentProgressMs < it.endTimeMs 
@@ -416,80 +674,113 @@ fun CookingActiveWorkflow(viewModel: CookViewModel) {
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
         // Total Progress Header
         val progress = viewModel.currentProgressMs.toFloat() / recipe.totalTimeMs.toFloat()
         Column {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(text = recipe.name.uppercase(), color = Color.Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                Text(text = "${(progress * 100).toInt()}%", color = GoldPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = recipe.name.uppercase(),
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp
+                )
+                Text(
+                    text = "${(progress * 100).toInt()}%",
+                    color = GoldPrimary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Black
+                )
             }
             Spacer(modifier = Modifier.height(4.dp))
             LinearProgressIndicator(
                 progress = { progress },
-                modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .clip(CircleShape),
                 color = GoldPrimary,
-                trackColor = Color.DarkGray
+                trackColor = Color(0xFF1E293B)
             )
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        // Spotify-style Recipe Scroll
+        // Steps Scroll
         Surface(
-            modifier = Modifier.fillMaxWidth().height(160.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(150.dp),
             color = Color(0xFF0F172A),
             shape = RoundedCornerShape(16.dp),
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
         ) {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(recipe.steps) { step ->
                     val isPassed = viewModel.currentProgressMs >= step.endTimeMs
                     val isActive = viewModel.currentProgressMs >= step.startTimeMs && viewModel.currentProgressMs < step.endTimeMs
-                    
+
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = if (isActive) Modifier.background(Color(0xFF22C55E).copy(alpha = 0.1f), RoundedCornerShape(8.dp)).padding(8.dp) else Modifier
+                        modifier = if (isActive) {
+                            Modifier
+                                .background(Color(0xFF22C55E).copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                                .padding(8.dp)
+                        } else {
+                            Modifier.padding(vertical = 2.dp)
+                        }
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(6.dp)
-                                .background(if (isActive) Color(0xFF22C55E) else if (isPassed) Color.Black else Color.Gray, CircleShape)
+                                .size(8.dp)
+                                .background(
+                                    if (isActive) Color(0xFF22C55E) else if (isPassed) Color.DarkGray else Color.Gray,
+                                    CircleShape
+                                )
                         )
-                        Spacer(modifier = Modifier.width(12.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
                         Text(
                             text = step.instruction,
                             color = when {
                                 isActive -> Color.White
-                                isPassed -> Color.Gray.copy(alpha = 0.5f)
-                                else -> Color.Gray
+                                isPassed -> Color.White.copy(alpha = 0.35f)
+                                else -> Color.White.copy(alpha = 0.7f)
                             },
-                            fontSize = 14.sp,
-                            fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
+                            fontSize = 13.sp,
+                            fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                            lineHeight = 17.sp
                         )
                     }
                 }
             }
         }
-        
-        Spacer(modifier = Modifier.height(12.dp))
-        
+
+        Spacer(modifier = Modifier.height(10.dp))
+
         // Chat History
         LazyColumn(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(bottom = 8.dp)
+            contentPadding = PaddingValues(bottom = 6.dp)
         ) {
             items(viewModel.messages) { msg ->
                 CookChatBubble(msg)
             }
         }
-        
-        // Premium Chat Input
+
+        // Chat Input
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
@@ -497,12 +788,20 @@ fun CookingActiveWorkflow(viewModel: CookViewModel) {
             TextField(
                 value = chatInput,
                 onValueChange = { chatInput = it },
-                placeholder = { Text("Ask Chef Gemini...", color = Color.Gray, fontSize = 14.sp) },
-                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                placeholder = {
+                    Text(
+                        text = "Ask Chef Gemini about this step...",
+                        color = Color.White.copy(alpha = 0.4f),
+                        fontSize = 13.sp
+                    )
+                },
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 46.dp),
                 shape = RoundedCornerShape(24.dp),
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = Color(0xFF1E293B),
-                    unfocusedContainerColor = Color(0xFF1E293B),
+                    unfocusedContainerColor = Color(0xFF0F172A),
                     focusedTextColor = Color.White,
                     unfocusedTextColor = Color.White,
                     focusedIndicatorColor = Color.Transparent,
@@ -515,7 +814,11 @@ fun CookingActiveWorkflow(viewModel: CookViewModel) {
                             chatInput = ""
                         }
                     }) {
-                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, tint = GoldPrimary)
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.Send,
+                            contentDescription = "Send",
+                            tint = GoldPrimary
+                        )
                     }
                 }
             )
@@ -532,20 +835,20 @@ fun CookChatBubble(msg: ChatMessage) {
     ) {
         Surface(
             shape = RoundedCornerShape(
-                topStart = 16.dp,
-                topEnd = 16.dp,
-                bottomStart = if (isUser) 16.dp else 4.dp,
-                bottomEnd = if (isUser) 4.dp else 16.dp
+                topStart = 14.dp,
+                topEnd = 14.dp,
+                bottomStart = if (isUser) 14.dp else 2.dp,
+                bottomEnd = if (isUser) 2.dp else 14.dp
             ),
-            color = if (isUser) Color(0xFF2563EB) else Color(0xFF334155),
-            tonalElevation = 2.dp
+            color = if (isUser) Color(0xFF2563EB) else Color(0xFF1E293B),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
         ) {
             Text(
                 text = msg.message,
                 color = Color.White,
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                 fontSize = 13.sp,
-                lineHeight = 18.sp
+                lineHeight = 17.sp
             )
         }
     }
@@ -553,27 +856,56 @@ fun CookChatBubble(msg: ChatMessage) {
 
 @Composable
 fun CompletionView(onDone: () -> Unit) {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        contentAlignment = Alignment.Center
+    ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Surface(
+                shape = CircleShape,
+                color = Color(0xFF22C55E).copy(alpha = 0.15f),
+                modifier = Modifier.size(72.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text("✓", color = Color(0xFF22C55E), fontSize = 36.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+
             Text(
                 text = "Cooking Finished!",
                 color = Color.White,
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold
             )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
             Text(
-                text = "Great job! Ready to serve?",
-                color = Color.Gray,
-                fontSize = 14.sp,
-                modifier = Modifier.padding(bottom = 32.dp)
+                text = "Your flat-tawa meal is ready to plate. Nutrition logged to Track.",
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(bottom = 24.dp)
             )
+
             Button(
                 onClick = onDone,
-                modifier = Modifier.width(200.dp).height(56.dp),
+                modifier = Modifier
+                    .width(180.dp)
+                    .height(50.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E)),
                 shape = RoundedCornerShape(12.dp)
             ) {
-                Text(text = "DONE", color = Color.Black, fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+                Text(
+                    text = "DONE",
+                    color = Color.Black,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 1.sp
+                )
             }
         }
     }

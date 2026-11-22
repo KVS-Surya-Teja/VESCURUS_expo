@@ -14,6 +14,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
@@ -27,10 +28,11 @@ import com.example.vescurus.di.AppModule
 import com.example.vescurus.model.Role
 import com.example.vescurus.ui.MainAppShell
 import com.example.vescurus.ui.RoleSelectionScreen
+import com.example.vescurus.ui.theme.VESCURUSTheme
 
 // Brand Theme Colors
 val GoldPrimary = Color(0xFFFFB800)
-val BlackBackground = Color(0xFF000000)
+val BlackBackground = Color(0xFF020617)
 val TextWhite = Color(0xFFFFFFFF)
 
 class MainActivity : ComponentActivity() {
@@ -39,7 +41,14 @@ class MainActivity : ComponentActivity() {
         AppModule.init(this)
         VescurusLogger.initSession(this)
         setContent {
-            VESCURUSApp()
+            VESCURUSTheme {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = BlackBackground
+                ) {
+                    VESCURUSApp()
+                }
+            }
         }
     }
 }
@@ -95,14 +104,21 @@ fun SplashScreen(onTimeout: () -> Unit) {
 
     LaunchedEffect(Unit) {
         startAnimation = true
-        delay(2500)
+        delay(2200)
         onTimeout()
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(BlackBackground),
+            .background(
+                Brush.radialGradient(
+                    colors = listOf(
+                        Color(0xFF1E293B),
+                        Color(0xFF020617)
+                    )
+                )
+            ),
         contentAlignment = Alignment.Center
     ) {
         Column(
@@ -118,29 +134,29 @@ fun SplashScreen(onTimeout: () -> Unit) {
                 painter = painterResource(id = R.drawable.ic_vescurus_logo),
                 contentDescription = "VESCURUS Logo",
                 modifier = Modifier
-                    .size(220.dp)
+                    .size(200.dp)
                     .padding(16.dp)
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             Text(
                 text = "VESCURUS",
                 color = GoldPrimary,
                 fontSize = 32.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 4.sp
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = 6.sp
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
             Text(
-                text = "Smart Cooking System",
-                color = TextWhite.copy(alpha = 0.7f),
-                fontSize = 14.sp,
-                letterSpacing = 1.sp
+                text = "EDGE AI SMART COOKING",
+                color = Color.White.copy(alpha = 0.7f),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 3.sp
             )
         }
     }
 }
-

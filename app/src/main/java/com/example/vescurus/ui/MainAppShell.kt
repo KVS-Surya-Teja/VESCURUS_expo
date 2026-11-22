@@ -1,14 +1,22 @@
 package com.example.vescurus.ui
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import android.util.Log
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -24,10 +32,9 @@ import com.example.vescurus.network.ConnectionStatus
 import com.example.vescurus.network.VescurusConnectionManager
 
 sealed class NavItem(val route: String, val icon: ImageVector, val label: String) {
-    object Home : NavItem("home", Icons.Default.Home, "Home")
-    object Cook : NavItem("cook", Icons.Default.Restaurant, "Cook")
-    object Track : NavItem("track", Icons.Default.Timeline, "Track")
-    object Account : NavItem("account", Icons.Default.AccountCircle, "Account")
+    object Cook : NavItem("cook", Icons.Default.Tune, "Cook & Vision")
+    object Track : NavItem("track", Icons.Default.Info, "Nutrition")
+    object Settings : NavItem("settings", Icons.Default.RestartAlt, "System")
 }
 
 @Composable
@@ -56,14 +63,15 @@ fun MainAppShell(
         }
     }
 
-    var selectedItem by remember { mutableStateOf(if (selectedRole == Role.GUIDE || selectedRole == Role.COOK) 1 else 0) }
-    val items = listOf(NavItem.Home, NavItem.Cook, NavItem.Track, NavItem.Account)
+    var selectedItem by remember { mutableStateOf(0) }
+    val items = listOf(NavItem.Cook, NavItem.Track, NavItem.Settings)
 
     Scaffold(
         bottomBar = {
             NavigationBar(
-                containerColor = Color.Black,
-                contentColor = GoldPrimary
+                containerColor = Color(0xFF020617),
+                contentColor = GoldPrimary,
+                tonalElevation = 8.dp
             ) {
                 items.forEachIndexed { index, item ->
                     NavigationBarItem(
@@ -71,15 +79,17 @@ fun MainAppShell(
                         label = {
                             Text(
                                 item.label,
-                                color = if (selectedItem == index) GoldPrimary else Color.Gray
+                                fontSize = 11.sp,
+                                fontWeight = if (selectedItem == index) FontWeight.Bold else FontWeight.Normal,
+                                color = if (selectedItem == index) GoldPrimary else Color.White.copy(alpha = 0.5f)
                             )
                         },
                         selected = selectedItem == index,
                         onClick = { selectedItem = index },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = GoldPrimary,
-                            unselectedIconColor = Color.Gray,
-                            indicatorColor = Color.DarkGray
+                            unselectedIconColor = Color.White.copy(alpha = 0.5f),
+                            indicatorColor = GoldPrimary.copy(alpha = 0.15f)
                         )
                     )
                 }
@@ -92,13 +102,7 @@ fun MainAppShell(
             color = Color(0xFF020617)
         ) {
             Column {
-                val showGlobalStatus = items[selectedItem] != NavItem.Cook
-                if (showGlobalStatus) {
-                    ConnectionStatusBar(selectedRole, connectionStatus)
-                }
-
                 when (items[selectedItem]) {
-                    NavItem.Home -> PlaceholderScreen("Welcome to VESCURUS Home")
                     NavItem.Cook -> {
                         Box(modifier = Modifier.fillMaxSize()) {
                             RoleSpecificCookScreen(
@@ -123,57 +127,10 @@ fun MainAppShell(
                         }
                     }
                     NavItem.Track -> TrackScreen(viewModel = cookViewModel)
-                    NavItem.Account -> AccountScreen(selectedRole, cookViewModel, onResetRole)
+                    NavItem.Settings -> AccountScreen(selectedRole, cookViewModel, onResetRole, connectionManager)
                 }
             }
         }
-    }
-}
-
-@Composable
-fun PlaceholderScreen(text: String) {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(text = text, color = Color.White, fontSize = 20.sp, textAlign = TextAlign.Center)
-    }
-}
-
-@Composable
-fun ConnectionStatusBar(role: Role, status: ConnectionStatus) {
-    if (role == Role.DEMONSTRATE || role == Role.NONE) return
-
-    val backgroundColor = when (status) {
-        ConnectionStatus.CONNECTED -> Color(0xFF2E7D32) // Green
-        ConnectionStatus.LOST, ConnectionStatus.DISCONNECTED -> Color(0xFFC62828) // Red
-        else -> Color(0xFFF57F17) // Orange
-    }
-
-    val statusText = when (status) {
-        ConnectionStatus.IDLE -> "Network Idle"
-        ConnectionStatus.SEARCHING -> "Searching..."
-        ConnectionStatus.FOUND -> "Guide Found"
-        ConnectionStatus.CONNECTING -> "Connecting..."
-        ConnectionStatus.CONNECTED -> if (role == Role.GUIDE) "Cook connected" else "Guide connected"
-        ConnectionStatus.RECONNECTING -> "Reconnecting..."
-        ConnectionStatus.DISCONNECTED -> "Disconnected"
-        ConnectionStatus.LOST -> "Connection lost"
-        else -> "Unknown"
-    }
-
-    Surface(
-        color = backgroundColor,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Text(
-            text = statusText,
-            color = Color.White,
-            modifier = Modifier.padding(8.dp),
-            textAlign = TextAlign.Center,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold
-        )
     }
 }
 
@@ -215,38 +172,168 @@ fun RoleSpecificCookScreen(
                 onDirectConnect = onDirectConnect
             )
         }
-        Role.DEMONSTRATE -> PlaceholderScreen("DEMO UI - Explore VESCURUS")
-        else -> PlaceholderScreen("No Role Selected")
+        Role.DEMONSTRATE -> {
+            CookScreen(
+                status = ConnectionStatus.CONNECTED,
+                diagnostics = "Standalone Demonstration",
+                detections = listOf(
+                    DetectionResult(
+                        label = "Egg",
+                        confidence = 0.94f,
+                        recipe_class = 0,
+                        box_2d = com.example.vescurus.model.BoundingBox(0.3f, 0.3f, 0.7f, 0.7f),
+                        supported = true
+                    )
+                ),
+                latestFrame = null,
+                viewModel = viewModel,
+                onSnapshot = {},
+                onDirectConnect = { _, _ -> }
+            )
+        }
+        else -> {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(text = "No Role Configured", color = Color.White)
+            }
+        }
     }
 }
 
 @Composable
-fun AccountScreen(role: Role, viewModel: CookViewModel, onResetRole: () -> Unit) {
+fun AccountScreen(
+    role: Role,
+    viewModel: CookViewModel,
+    onResetRole: () -> Unit,
+    connectionManager: VescurusConnectionManager
+) {
+    val localIp = remember { connectionManager.getLocalIpAddress() }
+
     Column(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        verticalArrangement = Arrangement.SpaceBetween
     ) {
-        Text(text = "Current Role: ${role.name}", color = Color.White, fontSize = 18.sp)
-        
-        Spacer(modifier = Modifier.height(16.dp))
-        
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(text = "Voice Instructions (TTS)", color = Color.White, fontSize = 14.sp)
-            Spacer(modifier = Modifier.width(16.dp))
-            Switch(
-                checked = viewModel.isTtsEnabled,
-                onCheckedChange = { viewModel.isTtsEnabled = it },
-                colors = SwitchDefaults.colors(checkedThumbColor = GoldPrimary)
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "SYSTEM & DIAGNOSTICS",
+                color = GoldPrimary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 2.sp
             )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "Configuration",
+                color = Color.White,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.ExtraBold
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Role Card
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color(0xFF0F172A),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "ACTIVE ROLE",
+                        color = Color.White.copy(alpha = 0.5f),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = role.name,
+                        color = GoldPrimary,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "LOCAL IP ADDRESS",
+                        color = Color.White.copy(alpha = 0.5f),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = localIp,
+                        color = Color.White,
+                        fontSize = 14.sp
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // TTS Setting Card
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color(0xFF0F172A),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Voice Guidance (TTS)",
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Spoken step announcements & timing cues",
+                            color = Color.White.copy(alpha = 0.6f),
+                            fontSize = 12.sp
+                        )
+                    }
+                    Switch(
+                        checked = viewModel.isTtsEnabled,
+                        onCheckedChange = { viewModel.isTtsEnabled = it },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = GoldPrimary,
+                            checkedTrackColor = GoldPrimary.copy(alpha = 0.4f)
+                        )
+                    )
+                }
+            }
         }
 
-        Spacer(modifier = Modifier.height(32.dp))
+        // Switch Role Button
         Button(
             onClick = onResetRole,
-            colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary)
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
+            border = BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.3f))
         ) {
-            Text("Reset Role (Dev Only)", color = Color.Black)
+            Text(
+                text = "Switch Device Role (Guide / Cook)",
+                color = GoldPrimary,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp
+            )
         }
     }
 }
