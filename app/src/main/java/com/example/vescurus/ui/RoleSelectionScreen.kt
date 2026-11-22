@@ -6,7 +6,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,8 +27,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -80,7 +83,7 @@ fun RoleSelectionScreen(onRoleSelected: (Role) -> Unit) {
                         modifier = Modifier.padding(bottom = 14.dp)
                     ) {
                         Text(
-                            text = "VESCURUS COOKING COMPANION",
+                            text = "VESCURUS",
                             color = GoldPrimary,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
@@ -90,17 +93,18 @@ fun RoleSelectionScreen(onRoleSelected: (Role) -> Unit) {
                     }
 
                     Text(
-                        text = "Select Device Mode",
+                        text = "How will you use\nthis phone?",
                         color = Color.White,
                         fontSize = 28.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = 0.5.sp
+                        letterSpacing = 0.5.sp,
+                        textAlign = TextAlign.Center
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Text(
-                        text = "Configure this phone as the overhead vision Guide or interactive Cook companion",
+                        text = "Pair two phones, or explore recipes on your own.",
                         color = Color.White.copy(alpha = 0.65f),
                         fontSize = 14.sp,
                         textAlign = TextAlign.Center,
@@ -125,18 +129,18 @@ fun RoleSelectionScreen(onRoleSelected: (Role) -> Unit) {
                 )
                 val cards = listOf(
                     CardDef(
-                        "GUIDE (VISION)", "OVERHEAD",
-                        "Mount safely above the preparation area. Analyze ingredients and share matching snapshots with Cook.",
+                        "Camera phone", "GUIDE",
+                        "Position this phone above your ingredients to share the view.",
                         Icons.Default.Videocam, Color(0xFF38BDF8), Role.GUIDE
                     ),
                     CardDef(
-                        "COOK (COMPANION)", "CHEF ASSIST",
-                        "Confirm ingredients, follow recipes at your pace, and keep a local cooking record.",
+                        "Cooking phone", "COOK",
+                        "Review ingredients and follow your recipe, one step at a time.",
                         Icons.Default.Restaurant, GoldPrimary, Role.COOK
                     ),
                     CardDef(
-                        "DEMONSTRATION", "STANDALONE",
-                        "Practise with offline guides and separate local records. No simulated camera or scale evidence.",
+                        "Practice session", "PRACTICE",
+                        "Explore offline recipes. Practice records are kept separate.",
                         Icons.Default.AutoAwesome, Color(0xFFA855F7), Role.DEMONSTRATE
                     )
                 )
@@ -169,9 +173,9 @@ fun RoleSelectionScreen(onRoleSelected: (Role) -> Unit) {
 
             // Footer
             Text(
-                text = "Prepare • Cook • Keep your record",
-                color = Color.White.copy(alpha = 0.35f),
-                fontSize = 11.sp,
+                text = "You can change this in Settings.",
+                color = Color.White.copy(alpha = 0.55f),
+                fontSize = 12.sp,
                 letterSpacing = 1.sp,
                 modifier = Modifier.padding(bottom = 4.dp)
             )
@@ -189,7 +193,8 @@ fun RoleCard(
     onClick: () -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
-    var pressed by remember { mutableStateOf(false) }
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
         targetValue = if (pressed) 0.96f else 1f,
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
@@ -197,21 +202,17 @@ fun RoleCard(
     )
 
     Surface(
+        onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            onClick()
+        },
+        interactionSource = interactionSource,
         modifier = Modifier
             .fillMaxWidth()
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .clip(RoundedCornerShape(20.dp))
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onPress = {
-                        pressed = true
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        tryAwaitRelease()
-                        pressed = false
-                    },
-                    onTap = { onClick() }
-                )
-            },
+            .semantics { role = androidx.compose.ui.semantics.Role.Button }
+            .testTag("role-${tag.lowercase()}"),
         color = Color(0xFF1E293B).copy(alpha = 0.85f),
         shape = RoundedCornerShape(20.dp),
         border = BorderStroke(1.dp, badgeColor.copy(alpha = 0.20f)),
@@ -256,7 +257,7 @@ fun RoleCard(
                     Text(
                         text = tag,
                         color = badgeColor,
-                        fontSize = 9.sp,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.ExtraBold,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                         letterSpacing = 0.8.sp,
@@ -269,8 +270,8 @@ fun RoleCard(
                 Text(
                     text = description,
                     color = Color.White.copy(alpha = 0.70f),
-                    fontSize = 12.sp,
-                    lineHeight = 16.sp
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp
                 )
             }
 

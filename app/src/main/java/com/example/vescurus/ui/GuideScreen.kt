@@ -12,8 +12,10 @@ import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
@@ -23,9 +25,11 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -54,25 +58,90 @@ import java.util.concurrent.atomic.AtomicLong
  */
 @Composable
 fun GuideContent(status: ConnectionStatus,diagnostics: String,detections: List<DetectionResult>,onBack: ()->Unit={},cameraSlot: (@Composable ()->Unit)?=null) {
+    var showPairing by rememberSaveable { mutableStateOf(false) }
+    val pairingCode = remember(diagnostics) { Regex("""Pairing code:\s*(\d{6})""").find(diagnostics)?.groupValues?.get(1) }
+    val cookContext = remember(diagnostics) {
+        diagnostics.lineSequence().firstOrNull { it.startsWith("Cook: ") }?.removePrefix("Cook: ")
+    }
+    val connected = status == ConnectionStatus.CONNECTED
+    val connectionTitle = when (status) {
+        ConnectionStatus.CONNECTED -> "Cook connected"
+        ConnectionStatus.SEARCHING -> "Ready to connect"
+        ConnectionStatus.DISCONNECTED, ConnectionStatus.LOST -> "Cook disconnected"
+        ConnectionStatus.FOUND, ConnectionStatus.CONNECTING, ConnectionStatus.RECONNECTING -> "Connecting to Cook…"
+        else -> "Starting Guide"
+    }
+    if (showPairing) GuidePairingDialog(diagnostics, pairingCode) { showPairing = false }
+
     BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
-        val landscape=maxWidth>maxHeight
+        val landscape = maxWidth > maxHeight
         cameraSlot?.invoke()
-        IconButton(onClick=onBack,modifier=Modifier.padding(12.dp).align(Alignment.TopStart).background(Color.Black.copy(alpha=.65f),CircleShape)) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack,"Switch role",tint=Color.White)
+        Box(
+            Modifier.align(Alignment.TopCenter).fillMaxWidth().height(if (landscape) 0.dp else 84.dp)
+                .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = .72f), Color.Transparent)))
+        )
+        IconButton(onClick = onBack, modifier = Modifier.padding(12.dp).align(Alignment.TopStart).background(Color.Black.copy(alpha = .55f), CircleShape)) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Switch role", tint = Color.White)
         }
-        if(!landscape)Column(Modifier.align(Alignment.TopCenter).padding(top=12.dp),horizontalAlignment=Alignment.CenterHorizontally) {
-            Text("VESCURUS",color=GoldPrimary,fontSize=22.sp,fontWeight=FontWeight.ExtraBold)
-            Text("GUIDE",color=Color.White,fontSize=12.sp)
+        if (!landscape) Column(Modifier.align(Alignment.TopCenter).padding(top = 15.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("VESCURUS", color = GoldPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
+            Text("Guide camera", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
         }
-        Surface(modifier=Modifier.align(if(landscape)Alignment.BottomEnd else Alignment.BottomCenter).padding(12.dp).then(if(landscape)Modifier.width(310.dp) else Modifier.fillMaxWidth()),
-            color=Color.Black.copy(alpha=.75f),shape=RoundedCornerShape(16.dp)) {
-            Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
-                Text(when(status) { ConnectionStatus.CONNECTED -> "Cook synchronized";ConnectionStatus.SEARCHING -> "Ready to pair with Cook";ConnectionStatus.DISCONNECTED,ConnectionStatus.LOST -> "Cook disconnected";else -> "Starting local connection" },color=Color.White,fontWeight=FontWeight.Bold,fontSize=15.sp)
-                Text(diagnostics,color=GoldPrimary,fontSize=12.sp)
-                if(!landscape)Text("Point at ingredients and tap Analyze scene. Auto analysis is optional and requires internet.",color=Color.White.copy(alpha=.7f),fontSize=11.sp)
+        Surface(
+            modifier = Modifier.align(if (landscape) Alignment.BottomEnd else Alignment.BottomCenter)
+                .padding(12.dp).then(if (landscape) Modifier.width(300.dp) else Modifier.fillMaxWidth()),
+            color = Color(0xFF0B1422).copy(alpha = .94f), shape = RoundedCornerShape(20.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = .12f))
+        ) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(Modifier.size(7.dp).background(if (connected) Color(0xFF6EE7B7) else GoldPrimary, CircleShape))
+                    Text(connectionTitle, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                }
+                Text(
+                    if (connected) cookContext ?: "Keep your ingredients in view." else "Connect your Cook phone on the same Wi-Fi or hotspot.",
+                    color = Color(0xFFB6C3D4), fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis
+                )
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                    if (pairingCode != null) Text("Code $pairingCode", color = GoldPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    else Spacer(Modifier.width(1.dp))
+                    TextButton(onClick = { showPairing = true }, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
+                        Text("Pairing details", color = GoldPrimary, fontSize = 12.sp)
+                    }
+                }
             }
         }
     }
+}
+
+@Composable
+private fun GuidePairingDialog(diagnostics: String, pairingCode: String?, onDismiss: () -> Unit) {
+    val address = remember(diagnostics) { Regex("""\b(?:\d{1,3}\.){3}\d{1,3}:\d{1,5}\b""").find(diagnostics)?.value }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Connect your Cook phone") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text("On the other phone, open Cook and choose Connect Guide.")
+                if (pairingCode != null) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Pairing code", fontSize = 12.sp)
+                        Text(pairingCode, fontSize = 28.sp, fontWeight = FontWeight.Bold, letterSpacing = 4.sp)
+                    }
+                }
+                if (address != null) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Guide address", fontSize = 12.sp)
+                        Text(address, fontWeight = FontWeight.SemiBold)
+                    }
+                } else if (diagnostics.isNotBlank()) {
+                    Text(diagnostics, fontSize = 12.sp)
+                }
+                Text("Keep both phones on the same Wi-Fi or hotspot.", fontSize = 12.sp)
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } }
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -147,19 +216,31 @@ fun GuideScreen(
                 streamingEnabled = status == ConnectionStatus.CONNECTED,
                 onAnalysisState = { analyzing=it }
             )
-            val landscape=androidx.compose.ui.platform.LocalConfiguration.current.orientation==android.content.res.Configuration.ORIENTATION_LANDSCAPE
-            Column(Modifier.fillMaxWidth().padding(top=if(landscape)8.dp else 82.dp,start=if(landscape)76.dp else 12.dp,end=12.dp)) {
-                Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                    Button(onClick={analysisRequest++},enabled=!analyzing,modifier=Modifier.testTag("analyze-scene")) { Text(if(analyzing) "Analyzing…" else "Analyze scene") }
-                    Surface(color=Color.Black.copy(alpha=.7f),shape=RoundedCornerShape(12.dp)) {
-                        Row(Modifier.padding(horizontal=8.dp),verticalAlignment=Alignment.CenterVertically) {
-                            Text("Auto",color=Color.White,fontSize=12.sp)
-                            Switch(automatic,{automatic=it},modifier=Modifier.testTag("auto-analysis"))
+            val landscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+            Column(Modifier.fillMaxWidth().padding(top = if (landscape) 8.dp else 82.dp, start = if (landscape) 76.dp else 12.dp, end = 12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { analysisRequest++ }, enabled = !analyzing, modifier = Modifier.testTag("analyze-scene"),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = Color(0xFF111827),
+                            disabledContainerColor = Color(0xFFE0B54F), disabledContentColor = Color(0xFF111827))
+                    ) {
+                        if (analyzing) {
+                            CircularProgressIndicator(Modifier.size(14.dp), color = Color(0xFF111827), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
+                        }
+                        Text(if (analyzing) "Analyzing…" else "Analyze scene", fontWeight = FontWeight.SemiBold)
+                    }
+                    Surface(color = Color(0xFF0B1422).copy(alpha = .9f), shape = RoundedCornerShape(14.dp)) {
+                        Row(Modifier.padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Auto", color = Color.White, fontSize = 12.sp)
+                            Switch(automatic, { automatic = it }, modifier = Modifier.testTag("auto-analysis"),
+                                colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF111827), checkedTrackColor = GoldPrimary))
                         }
                     }
                 }
-                Spacer(Modifier.height(8.dp))
-                ObservationPanel(observation,Modifier.width(if(landscape)180.dp else 150.dp).height(if(landscape)120.dp else 190.dp))
+                Spacer(Modifier.height(10.dp))
+                ObservationPanel(observation, Modifier.width(if (landscape) 180.dp else 150.dp).height(if (landscape) 120.dp else 190.dp), isAnalyzing = analyzing)
             }
         }
     )

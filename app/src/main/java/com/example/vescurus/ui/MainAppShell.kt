@@ -8,10 +8,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.RestartAlt
-import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Restaurant
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -49,9 +51,9 @@ import com.example.vescurus.network.ConnectionStatus
 import com.example.vescurus.network.VescurusConnectionManager
 
 sealed class NavItem(val route: String, val icon: ImageVector, val label: String) {
-    object Cook : NavItem("cook", Icons.Default.Tune, "Cook & Vision")
-    object Track : NavItem("track", Icons.Default.Info, "History")
-    object Settings : NavItem("settings", Icons.Default.RestartAlt, "System")
+    object Cook : NavItem("cook", Icons.Default.Restaurant, "Cook")
+    object Track : NavItem("track", Icons.Default.History, "History")
+    object Settings : NavItem("settings", Icons.Default.Settings, "Settings")
 }
 
 @Composable
@@ -113,21 +115,23 @@ fun MainAppShell(
             ) {
                 items.forEachIndexed { index, item ->
                     val selected = selectedItem == index
+                    val isGuideCamera = selectedRole == Role.GUIDE && item == NavItem.Cook
+                    val itemLabel = if (isGuideCamera) "Camera" else item.label
                     NavigationBarItem(
                         icon = {
                             Icon(
-                                item.icon,
-                                contentDescription = item.label,
+                                if (isGuideCamera) Icons.Default.Videocam else item.icon,
+                                contentDescription = itemLabel,
                                 modifier = Modifier.size(if (selected) 24.dp else 22.dp)
                             )
                         },
                         modifier = Modifier.testTag("nav-${item.route}"),
                         label = {
                             Text(
-                                item.label,
-                                fontSize = 10.sp,
+                                itemLabel,
+                                fontSize = 12.sp,
                                 fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.Normal,
-                                color = if (selected) GoldPrimary else Color.White.copy(alpha = 0.4f)
+                                color = if (selected) GoldPrimary else Color.White.copy(alpha = 0.6f)
                             )
                         },
                         selected = selected,
@@ -140,7 +144,7 @@ fun MainAppShell(
                         },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = GoldPrimary,
-                            unselectedIconColor = Color.White.copy(alpha = 0.4f),
+                            unselectedIconColor = Color.White.copy(alpha = 0.6f),
                             indicatorColor = GoldPrimary.copy(alpha = 0.12f)
                         )
                     )
@@ -191,7 +195,14 @@ fun MainAppShell(
                             onVideoAvailable = connectionManager::broadcastVideo
                         )
                     }
-                    NavItem.Track -> TrackScreen(viewModel = cookViewModel)
+                    NavItem.Track -> TrackScreen(
+                        viewModel = cookViewModel,
+                        allowResume = selectedRole != Role.GUIDE,
+                        onResumeDraft = {
+                            previousItem.value = selectedItem
+                            selectedItem = 0
+                        }
+                    )
                     NavItem.Settings -> AccountScreen(selectedRole, cookViewModel, onResetRole, connectionManager)
                 }
             }
@@ -246,7 +257,7 @@ fun RoleSpecificCookScreen(
         Role.DEMONSTRATE -> {
             CookScreen(
                 status = ConnectionStatus.IDLE,
-                diagnostics = "DEMONSTRATION • simulated observations • no physical evidence",
+                diagnostics = "Practice session · manual entries · separate history",
                 detections = emptyList(),
                 latestFrame = null,
                 viewModel = viewModel,
@@ -256,7 +267,7 @@ fun RoleSpecificCookScreen(
         }
         else -> {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(text = "No Role Configured", color = Color.White)
+                Text(text = "Choose how to use this phone", color = Color.White)
             }
         }
     }
@@ -273,6 +284,7 @@ fun AccountScreen(role: Role, viewModel: CookViewModel, onResetRole: () -> Unit,
     val cameraFresh by connectionManager.cameraFresh.collectAsStateWithLifecycle()
     val visionStatus by connectionManager.visionStatus.collectAsStateWithLifecycle()
     var exportMessage by remember { mutableStateOf<String?>(null) }
+    var detailsExpanded by rememberSaveable { mutableStateOf(false) }
     val exporter=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if(uri!=null) {
             val content=viewModel.exportJson()
@@ -284,37 +296,150 @@ fun AccountScreen(role: Role, viewModel: CookViewModel, onResetRole: () -> Unit,
             }
         }
     }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
-        Text("SYSTEM",color=GoldPrimary,fontSize=11.sp,fontWeight=FontWeight.Bold,letterSpacing=2.sp)
-        Text("Ready for your setup",color=Color.White,fontSize=27.sp,fontWeight=FontWeight.ExtraBold)
-        SessionCard("This device", "${role.name} · Android ${android.os.Build.VERSION.RELEASE}") {
-            Text("Local IP: ${connectionManager.getLocalIpAddress()}",color=Color.White,fontSize=13.sp)
-            Text("Guide peer: ${status.name.lowercase()}",color=Color.White,fontSize=13.sp)
-            Text(diagnostics.ifBlank { "No live peer session in this role." },color=Color(0xFF94A3B8),fontSize=12.sp)
-            if(role==Role.GUIDE)Text("Pairing code: $pairCode",color=GoldPrimary,fontSize=22.sp,fontWeight=FontWeight.Bold)
-            Text("Camera: ${if(cameraFresh) "fresh frames" else "no fresh stream"}",color=Color.White,fontSize=13.sp)
-            Text("Vision: $visionStatus",color=Color.White,fontSize=13.sp)
-            Text("Engine: ${com.example.vescurus.di.AppModule.engineDescription}",color=Color(0xFF94A3B8),fontSize=12.sp)
-            Text("Cloud vision and the optional assistant require internet. Local phone communication and saved cooking data do not.",color=Color(0xFF94A3B8),fontSize=12.sp)
+    val muted = Color(0xFF94A3B8)
+    val practice = role == Role.DEMONSTRATE
+    val deviceLabel = when (role) {
+        Role.GUIDE -> "Camera phone"
+        Role.COOK -> "Cooking phone"
+        Role.DEMONSTRATE -> "Practice session · separate history"
+        else -> "Choose a phone role"
+    }
+    val connectionLabel = when (status) {
+        ConnectionStatus.CONNECTED -> "Phones connected"
+        ConnectionStatus.CONNECTING -> "Connecting…"
+        ConnectionStatus.RECONNECTING -> "Reconnecting…"
+        ConnectionStatus.FOUND -> "Camera phone found"
+        ConnectionStatus.SEARCHING -> if (role == Role.GUIDE) "Ready to pair" else "Looking for the camera phone"
+        ConnectionStatus.DISCONNECTED, ConnectionStatus.LOST -> "Phone disconnected"
+        ConnectionStatus.IDLE -> "Not connected"
+    }
+    // Keep actionable failures visible; raw session/protocol details stay in the disclosure below.
+    val connectionNotice = diagnostics.takeIf { message ->
+        listOf("rejected", "could not", "unavailable", "lost", "retry", "disconnected", "enter ")
+            .any { message.contains(it, ignoreCase = true) }
+    }?.substringBefore(" |")
+    val recognitionLabel = when (visionStatus) {
+        "SUCCESS" -> "Analysis ready"
+        "POOR_IMAGE" -> "Needs a clearer view"
+        "QUOTA_OR_RATE_LIMIT" -> "Usage limit reached"
+        "TIMEOUT" -> "Analysis timed out"
+        "NETWORK_UNAVAILABLE" -> "Check internet connection"
+        "UNCONFIGURED" -> "Setup required"
+        "CREDENTIAL_FAILURE" -> "Service access failed"
+        "MODEL_UNAVAILABLE", "ON_DEVICE_UNAVAILABLE" -> "Recognition unavailable"
+        "BLOCKED_OR_EMPTY_RESPONSE", "INCOMPLETE_RESPONSE", "MALFORMED_RESPONSE", "API_FAILURE" -> "Analysis unavailable"
+        else -> when {
+            visionStatus.startsWith("Analysis expired") -> "Result expired"
+            observation == null -> "Waiting for analysis"
+            else -> "Analysis unavailable"
         }
-        SessionCard("Scale", "Bypassed for this exhibition setup") {
-            Text("No live scale is connected. Quantities are entered manually and labelled as manual evidence. Calibration and live weighing will be enabled with the physical assembly.",color=Color(0xFF94A3B8),fontSize=13.sp)
+    }
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("SETTINGS", color = GoldPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+            Text("Make it yours", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
+            Text(deviceLabel, color = muted, fontSize = 14.sp)
         }
-        SessionCard("Voice guidance") {
-            Row(verticalAlignment=Alignment.CenterVertically) {
-                Text("Speak step instructions",color=Color.White,modifier=Modifier.weight(1f))
-                Switch(viewModel.isTtsEnabled,{viewModel.toggleVoice()})
+
+        if (!practice) {
+            SessionCard("Phone connection") {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(Modifier.size(8.dp).background(if (status == ConnectionStatus.CONNECTED) Color(0xFF86EFAC) else GoldPrimary, CircleShape))
+                    Text(connectionLabel, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                }
+                connectionNotice?.let { Text(it, color = GoldPrimary, fontSize = 13.sp) }
+                if (role == Role.GUIDE) {
+                    SettingsValue("Wi-Fi address", connectionManager.getLocalIpAddress())
+                    SettingsValue("Pairing code", pairCode, highlight = true)
+                } else if (status != ConnectionStatus.CONNECTED) {
+                    Text("Connect to your camera phone from Cook.", color = muted, fontSize = 13.sp)
+                }
+                SettingsValue("Camera", if (cameraFresh) "Streaming" else "No current stream")
+                SettingsValue("Recognition", recognitionLabel)
+                Text("Ingredient recognition needs internet.", color = muted, fontSize = 12.sp)
             }
-            Text("Only step actions and timer reminders are announced. Camera frames never trigger repeated speech.",color=Color(0xFF94A3B8),fontSize=12.sp)
         }
-        SessionCard("Stored on this phone") {
-            Text("Active session, history, correction audit and retrieved recipes are stored in app-private files. No hosted database is required. Demonstration records are separate.",color=Color(0xFF94A3B8),fontSize=13.sp)
-            Text("${viewModel.sessions.size} retained sessions · ${if(viewModel.isSaving) "saving…" else "local storage ready"}",color=Color.White,fontSize=13.sp)
-            Button(onClick={exporter.launch("vescurus-${viewModel.sessionId.take(8)}.json")},enabled=!viewModel.isLoading,modifier=Modifier.fillMaxWidth().testTag("export-session")){Text("Export sessions as JSON")}
-            exportMessage?.let { Text(it,color=GoldPrimary,fontSize=12.sp) }
-            viewModel.storageMessage?.let { Text(it,color=GoldPrimary);TextButton(onClick=viewModel::retrySave){Text("Retry save")} }
+
+        SessionCard("Voice guidance") {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Spoken guidance", color = Color.White, fontSize = 15.sp)
+                    Text("Steps, reminders and assistant replies.", color = muted, fontSize = 12.sp)
+                }
+                Switch(viewModel.isTtsEnabled, { viewModel.toggleVoice() })
+            }
         }
-        OutlinedButton(onClick=onResetRole,modifier=Modifier.fillMaxWidth().testTag("switch-role")){Text("Switch Guide / Cook / Demonstration")}
-        Text("VESCURUS · Kotlin / Compose · local session owner: Cook",color=Color(0xFF94A3B8),fontSize=11.sp)
+
+        SessionCard("Ingredient quantities", "Manual entry") {
+            Text("No connected scale. Enter your measured amounts as you prepare.", color = muted, fontSize = 13.sp)
+        }
+
+        SessionCard("Saved on this phone") {
+            Text(
+                when {
+                    viewModel.isLoading -> "Loading your records…"
+                    viewModel.isSaving -> "Saving your changes…"
+                    viewModel.sessions.isEmpty() -> "Your current session is kept here."
+                    else -> "${viewModel.sessions.size} saved ${if (viewModel.sessions.size == 1) "session" else "sessions"}"
+                },
+                color = Color.White, fontSize = 14.sp
+            )
+            if (practice) Text("Practice records are kept separate.", color = muted, fontSize = 12.sp)
+            viewModel.storageMessage?.let {
+                Text(it, color = GoldPrimary, fontSize = 13.sp)
+                TextButton(onClick = viewModel::retrySave) { Text("Retry save") }
+            }
+            OutlinedButton(
+                onClick = { exporter.launch("vescurus-${viewModel.sessionId.take(8)}.json") },
+                enabled = !viewModel.isLoading,
+                modifier = Modifier.fillMaxWidth().testTag("export-session")
+            ) { Text("Export sessions") }
+            exportMessage?.let { Text(it, color = GoldPrimary, fontSize = 12.sp) }
+        }
+
+        OutlinedButton(onClick = onResetRole, modifier = Modifier.fillMaxWidth().testTag("switch-role")) {
+            Text("Change how this phone is used")
+        }
+
+        Column {
+            TextButton(onClick = { detailsExpanded = !detailsExpanded }, modifier = Modifier.fillMaxWidth().testTag("advanced-details")) {
+                Text("Advanced details", modifier = Modifier.weight(1f), textAlign = TextAlign.Start, color = muted)
+                Icon(if (detailsExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null, tint = muted)
+            }
+            AnimatedVisibility(detailsExpanded) {
+                SessionCard("Connection & records") {
+                    Text("${role.name} · Android ${android.os.Build.VERSION.RELEASE}", color = muted, fontSize = 12.sp)
+                    Text("Local address: ${connectionManager.getLocalIpAddress()}", color = muted, fontSize = 12.sp)
+                    Text(diagnostics.ifBlank { "No active peer connection." }, color = muted, fontSize = 12.sp)
+                    Text("Recognition: $visionStatus", color = muted, fontSize = 12.sp)
+                    Text("Engine: ${com.example.vescurus.di.AppModule.engineDescription}", color = muted, fontSize = 12.sp)
+                    observation?.let {
+                        Text("Snapshot ${it.frameId} · ${it.status} · ${it.inferenceMs} ms", color = muted, fontSize = 12.sp)
+                    }
+                    Text("Session ${viewModel.sessionId} · revision ${viewModel.sessionVersion}", color = muted, fontSize = 12.sp)
+                    Text("Exports include your current session, history and correction records in JSON format.", color = muted, fontSize = 12.sp)
+                }
+            }
+        }
+        Text("VESCURUS", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, color = muted, fontSize = 11.sp, letterSpacing = 2.sp)
+    }
+}
+
+@Composable
+private fun SettingsValue(label: String, value: String, highlight: Boolean = false) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.Top) {
+        Text(label, color = Color(0xFF94A3B8), fontSize = 13.sp, modifier = Modifier.weight(0.8f))
+        Text(
+            value,
+            color = if (highlight) GoldPrimary else Color.White,
+            fontSize = if (highlight) 18.sp else 13.sp,
+            fontWeight = if (highlight) FontWeight.Bold else FontWeight.Normal,
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(1.2f)
+        )
     }
 }

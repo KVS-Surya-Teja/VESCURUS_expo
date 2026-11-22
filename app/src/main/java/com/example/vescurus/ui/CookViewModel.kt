@@ -24,6 +24,36 @@ import java.util.UUID
 data class ChatMessage(val sender: String, val message: String)
 enum class CookingState { IDLE, RECIPE_SELECTION, COUNTDOWN, COOKING, DONE }
 
+/** A bounded conversation with the current, confirmed cooking context. No camera frame is sent. */
+internal fun cookingAssistantPrompt(session: CookingSession, messages: List<ChatMessage>): String = buildString {
+    appendLine("You are VESCURUS, a helpful cooking assistant. Give concise, practical replies, usually two or three sentences.")
+    appendLine("Use the conversation to understand follow-up questions. Ask one useful question when details are missing.")
+    appendLine("No camera image is attached to this chat. Do not claim to see the food, measure quantities, or verify doneness or safety.")
+    appendLine("The following session is user-confirmed context. Recipe targets are not measured amounts. Keep g, ml and counts distinct.")
+    appendLine("Recipe: ${session.recipe?.name ?: "Not chosen yet"}")
+    appendLine("Cooking state: ${session.state}${if (session.paused) " (paused)" else ""}")
+    session.recipe?.steps?.getOrNull(session.step)?.let {
+        appendLine("Current step ${session.step + 1}: ${it.instruction}")
+    }
+    val activeEntries = session.entries.filter { it.status != EntryStatus.UNDONE }
+    appendLine("Ingredient records:")
+    if (activeEntries.isEmpty()) appendLine("None confirmed yet.")
+    activeEntries.forEach { entry ->
+        val quantity = entry.quantity?.let { "${it.value} ${it.unit.label}" } ?: "quantity unknown"
+        val source = when (entry.quantitySource) {
+            EvidenceSource.SCALE -> "scale record"
+            EvidenceSource.MANUAL -> "entered by the user"
+            else -> "no measurement recorded"
+        }
+        appendLine("- ${entry.label}: $quantity ($source; ${entry.status}).${if (entry.identities.size > 1) " This is one combined batch, not a quantity for each ingredient." else ""}")
+    }
+    appendLine("Recent conversation:")
+    messages.filter { it.sender != "System" }.takeLast(12).forEach {
+        appendLine("${if (it.sender == "User") "User" else "Assistant"}: ${it.message.take(4000)}")
+    }
+    append("Reply to the latest user message.")
+}
+
 /** The sole session writer. Camera and peer state are evidence inputs, never automatic additions. */
 class CookViewModel @JvmOverloads constructor(application: Application, directory: File = File(application.filesDir,"sessions")) : AndroidViewModel(application), TextToSpeech.OnInitListener {
     private val store=SessionStore(directory)
@@ -36,7 +66,7 @@ class CookViewModel @JvmOverloads constructor(application: Application, director
     var isLoading by mutableStateOf(true); private set
     var isSaving by mutableStateOf(false); private set
     var storageMessage by mutableStateOf<String?>(null); private set
-    var recipeMessage by mutableStateOf("Choose ingredients, then search online or open an offline guide."); private set
+    var recipeMessage by mutableStateOf("Find recipes for your ingredients, or choose an offline guide."); private set
     var isFetchingRecipes by mutableStateOf(false); private set
     var onlineRecipes by mutableStateOf<List<Recipe>>(emptyList()); private set
     var isDemo by mutableStateOf(false); private set
@@ -50,6 +80,8 @@ class CookViewModel @JvmOverloads constructor(application: Application, director
     private var fetchJob: Job?=null
     private var loadJob: Job?=null
     private var timerJob: Job?=null
+    private var chatJob: Job?=null
+    private var chatGeneration=0L
     private var modeInitialized=false
     private var voice: TextToSpeech?=TextToSpeech(application,this)
     private var voiceReady=false
@@ -78,6 +110,7 @@ class CookViewModel @JvmOverloads constructor(application: Application, director
     fun setDemonstration(demo: Boolean) {
         if(modeInitialized && demo==isDemo) return
         modeInitialized=true;isDemo=demo;isLoading=true
+        resetChat()
         loadJob?.cancel();timerJob?.cancel();fetchJob?.cancel()
         loadJob=viewModelScope.launch {
             val loaded=withContext(Dispatchers.IO) { store.load(demo) }
@@ -106,7 +139,7 @@ class CookViewModel @JvmOverloads constructor(application: Application, director
             identitySource=if(identities.size>1) EvidenceSource.MIXED else if(vision!=null) EvidenceSource.VISION_CONFIRMED else EvidenceSource.MANUAL,
             quantity=q,quantitySource=if(q!=null) EvidenceSource.MANUAL else null,vision=vision)
         val next=SessionReducer.add(session,entry,System.currentTimeMillis())
-        if(next!=session) { session=next;persist();recipeMessage="Ingredients changed. Refresh suggestions when ready." }
+        if(next!=session) { session=next;persist();recipeMessage="Ready to find recipes for these ingredients." }
     }
     fun correctEntry(id: String,input: String,amount: Double?,unit: QuantityUnit) {
         val names=input.split(',','+').mapNotNull(::canonicalizeIngredientLabel).filter { it!="Unsupported object" && it.length<=80 }.distinct()
@@ -123,20 +156,20 @@ class CookViewModel @JvmOverloads constructor(application: Application, director
         if(isFetchingRecipes || ingredients.isEmpty() || isLoading)return
         val names=ingredients.distinct().toList()
         fetchJob=viewModelScope.launch {
-            isFetchingRecipes=true;recipeMessage="Searching Spoonacular for confirmed ingredients…"
+            isFetchingRecipes=true;recipeMessage="Finding recipes for your ingredients…"
             try {
                 val found=repository.generateRecipesForIngredients(names)
                 onlineRecipes=found;_availableRecipes.value=found
-                recipeMessage=if(confirmedIngredients.toSet()!=names.toSet()) "Results are for the earlier ingredient list. Search again to include your new ingredients." else if(found.isEmpty()) "No matching pan recipes returned. Saved and built-in guides remain available." else "${found.size} recipes retrieved from Spoonacular. Targets are separate from your measured quantities."
+                recipeMessage=if(confirmedIngredients.toSet()!=names.toSet()) "Your ingredients changed. Search again for updated suggestions." else if(found.isEmpty()) "No matches yet. Try different ingredients or an offline guide." else "${found.size} recipes from Spoonacular."
                 if(found.isNotEmpty())withContext(Dispatchers.IO) { store.saveRecipes(found) }
             } catch(e: CancellationException) { throw e
             } catch(e: Exception) {
                 recipeMessage=when((e as? RecipeServiceException)?.reason) {
-                    "UNCONFIGURED" -> "Spoonacular key is not configured. Use a built-in or saved guide."
-                    "CREDENTIALS" -> "Spoonacular rejected the credentials. Your ingredients are saved locally."
-                    "QUOTA_EXHAUSTED" -> "Spoonacular quota is exhausted. Use saved or built-in guides."
-                    "RATE_LIMITED" -> "Spoonacular is rate limiting requests. Try later; ingredients are retained."
-                    else -> "Online recipe search is unavailable. Saved and built-in guides remain usable."
+                    "UNCONFIGURED" -> "Online recipes aren't set up yet. Offline guides are ready."
+                    "CREDENTIALS" -> "Online recipes couldn't connect. Please check the service setup."
+                    "QUOTA_EXHAUSTED" -> "Online recipe limit reached. Choose a saved or offline guide."
+                    "RATE_LIMITED" -> "Recipe search is busy. Try again shortly."
+                    else -> "Online recipes are unavailable. Choose a saved or offline guide."
                 }
             } finally { isFetchingRecipes=false }
         }
@@ -190,7 +223,7 @@ class CookViewModel @JvmOverloads constructor(application: Application, director
     }
     fun startNewSession() {
         if(session.completedAt==null && (session.entries.isNotEmpty() || session.recipe!=null))return
-        timerJob?.cancel();messages.clear();session=CookingSession(demonstration=isDemo);persist()
+        timerJob?.cancel();resetChat();session=CookingSession(demonstration=isDemo);persist()
     }
     fun archiveDraftAndStartNew() {
         if(isLoading)return
@@ -199,29 +232,42 @@ class CookViewModel @JvmOverloads constructor(application: Application, director
             val draft=session.copy(paused=true,updatedAt=System.currentTimeMillis(),version=session.version+1)
             sessions=sessions.filterNot { it.id==draft.id }+draft
         }
-        session=CookingSession(demonstration=isDemo);messages.clear();syncHistory();persist()
+        resetChat();session=CookingSession(demonstration=isDemo);syncHistory();persist()
     }
     fun resumeDraft(id: String) {
         val draft=sessions.find { it.id==id && it.completedAt==null } ?: return
-        timerJob?.cancel()
+        timerJob?.cancel();resetChat()
         val current=session
         sessions=sessions.filterNot { it.id==id }
         if(current.completedAt==null && (current.entries.isNotEmpty() || current.recipe!=null)) sessions=sessions.filterNot { it.id==current.id }+current.copy(paused=true)
         session=draft.copy(paused=true,version=draft.version+1,updatedAt=System.currentTimeMillis());syncHistory();persist()
     }
     fun exportJson(): String = store.export(LocalState(active=session,history=sessions))
-    fun toggleVoice() { isTtsEnabled=!isTtsEnabled;prefs.edit().putBoolean("voice",isTtsEnabled).apply() }
+    fun toggleVoice() { isTtsEnabled=!isTtsEnabled;if(!isTtsEnabled)voice?.stop();prefs.edit().putBoolean("voice",isTtsEnabled).apply() }
+    private fun resetChat() {
+        chatGeneration++;chatJob?.cancel();chatJob=null;isGenerating=false;messages.clear();voice?.stop()
+    }
     fun sendMessage(text: String) {
-        if(isGenerating || text.isBlank())return
-        messages.add(ChatMessage("User",text));isGenerating=true
-        viewModelScope.launch {
+        val question=text.trim()
+        if(isGenerating || isLoading || question.isEmpty())return
+        messages.add(ChatMessage("User",question));isGenerating=true
+        val requestGeneration=chatGeneration
+        val requestSessionId=session.id
+        val prompt=cookingAssistantPrompt(session,messages.toList())
+        chatJob=viewModelScope.launch {
             try {
                 val model=GenerativeModel(BuildConfig.GEMINI_MODEL,BuildConfig.GEMINI_API_KEY)
-                val response=model.generateContent("You are VESCURUS, a cooking assistant. Keep replies brief. Do not claim to observe an action, measure mass, or certify safety/doneness. Recipe: ${session.recipe?.name}. Current instruction: ${session.recipe?.steps?.getOrNull(session.step)?.instruction}. User asks: $text")
-                messages.add(ChatMessage("AI suggestion",response.text ?: "No answer was returned."))
+                val response=model.generateContent(prompt)
+                if(requestGeneration==chatGeneration && requestSessionId==session.id) {
+                    val reply=response.text?.takeIf { it.isNotBlank() }
+                    if(reply==null) messages.add(ChatMessage("System","No reply came back. Please try again."))
+                    else { messages.add(ChatMessage("AI suggestion",reply));speak(reply) }
+                }
             } catch(e: CancellationException) { throw e
-            } catch(_: Exception) { messages.add(ChatMessage("System","Online assistant unavailable. Your recipe and ingredients are saved on this phone.")) }
-            finally { isGenerating=false }
+            } catch(_: Exception) {
+                if(requestGeneration==chatGeneration && requestSessionId==session.id)
+                    messages.add(ChatMessage("System","The assistant couldn't reply. Try again in a moment."))
+            } finally { if(requestGeneration==chatGeneration)isGenerating=false }
         }
     }
     override fun onInit(status: Int) { if(status==TextToSpeech.SUCCESS) { voice?.language=Locale.US;voiceReady=true } }
