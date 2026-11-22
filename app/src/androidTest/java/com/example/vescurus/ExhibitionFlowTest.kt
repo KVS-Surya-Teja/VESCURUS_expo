@@ -155,6 +155,7 @@ class ExhibitionFlowTest {
         compose.onNodeWithTag("cook-tab-recipes").performClick()
         scroll("offline-guides");compose.onNodeWithTag("offline-guides").performClick()
         scroll("recipe-local-tomato-onion");compose.onNodeWithTag("recipe-local-tomato-onion").performClick()
+        compose.onNodeWithTag("find-recipes").assertDoesNotExist()
         captureReview("recipe-ready")
         scroll("start-cooking");compose.onNodeWithTag("start-cooking").performClick()
         captureReview("cooking-step")

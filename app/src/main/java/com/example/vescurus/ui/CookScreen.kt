@@ -132,6 +132,7 @@ fun CookScreen(
     var timerDialog by rememberSaveable { mutableStateOf(false) }
     var chat by rememberSaveable { mutableStateOf("") }
     var ingredientReviewed by rememberSaveable { mutableStateOf(false) }
+    var ingredientFlowActive by rememberSaveable { mutableStateOf(false) }
 
     val haptic = LocalHapticFeedback.current
     val context = LocalContext.current
@@ -159,6 +160,7 @@ fun CookScreen(
     val recipeScroll = rememberLazyListState()
     val session = viewModel.session
     val recipe = session.recipe
+    var lastRecipeId by rememberSaveable(session.id) { mutableStateOf(recipe?.id) }
     val entries = session.entries.filter { it.status != EntryStatus.UNDONE }
     val observations = remember(detections) {
         detections.filter { it.supported && it.confidence >= .5f }
@@ -178,6 +180,7 @@ fun CookScreen(
         )
     }
     fun identifyIngredient() {
+        ingredientFlowActive = true
         ingredientReviewed = false
         workspace = 0
         onSnapshot()
@@ -191,14 +194,29 @@ fun CookScreen(
         }
     }
     fun chooseRecipe(selected: Recipe) {
+        ingredientFlowActive = false
+        ingredientReviewed = false
         viewModel.selectRecipe(selected)
         workspace = 0
         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
     }
 
-    LaunchedEffect(session.id) { chat = ""; dictationSession = null; ingredientReviewed = false }
+    LaunchedEffect(session.id) {
+        chat = ""; dictationSession = null; ingredientReviewed = false; ingredientFlowActive = false
+    }
+    LaunchedEffect(recipe?.id) {
+        if (lastRecipeId != recipe?.id) {
+            ingredientFlowActive = false
+            ingredientReviewed = false
+            lastRecipeId = recipe?.id
+        }
+    }
     LaunchedEffect(observation?.sessionId, observation?.streamId, observation?.frameId) {
-        observation?.let { viewModel.receiveIngredientObservation(it) }
+        observation?.takeIf { it.sessionId == session.id }?.let {
+            ingredientFlowActive = true
+            ingredientReviewed = false
+            viewModel.receiveIngredientObservation(it)
+        }
     }
     LaunchedEffect(session.id, recipe?.id, viewModel.cookingState, session.step) {
         assistantScroll.scrollToItem(0)
@@ -234,6 +252,7 @@ fun CookScreen(
                 }
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 ingredientReviewed = true
+                ingredientFlowActive = true
                 editor = null
             }
         )
@@ -337,7 +356,7 @@ fun CookScreen(
                         }
                         if (session.completedAt == null &&
                             viewModel.cookingState != CookingState.COOKING &&
-                            (recipe == null || viewModel.recognitionInProgress || observations.isNotEmpty() || ingredientReviewed)) {
+                            (recipe == null || ingredientFlowActive)) {
                             item("welcome") {
                                 IngredientRecognitionCard(
                                     connected = status == ConnectionStatus.CONNECTED,
@@ -349,7 +368,7 @@ fun CookScreen(
                                     hasIngredients = entries.isNotEmpty(),
                                     onIdentify = ::identifyIngredient,
                                     onReview = ::reviewObservation,
-                                    onManual = { editor = EntryEditor() },
+                                    onManual = { ingredientFlowActive = true; editor = EntryEditor() },
                                     onConnect = { connect = true },
                                     onRecipes = { viewModel.planRecipeForIngredients(); workspace = 0 }
                                 )
@@ -404,7 +423,7 @@ fun CookScreen(
                             }
                             if (session.completedAt == null) {
                                 Button(
-                                    onClick = { editor = EntryEditor() },
+                                    onClick = { ingredientFlowActive = true; editor = EntryEditor() },
                                     enabled = !viewModel.isLoading,
                                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("add-ingredient"),
                                     colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = Color.Black),
