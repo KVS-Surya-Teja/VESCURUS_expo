@@ -203,12 +203,13 @@ fun CookScreen(
     }
 
     BoxWithConstraints(Modifier.fillMaxSize().background(KitchenBackground).imePadding()) {
+        val availableHeight = maxHeight
         val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
-        val tightWorkspace = maxHeight < 360.dp
+        val tightWorkspace = availableHeight < 360.dp
         // Keep the composer and current task usable in landscape and when the keyboard opens.
-        val compactCamera = cameraCollapsed || keyboardVisible || maxHeight < 500.dp
+        val compactCamera = cameraCollapsed || keyboardVisible || availableHeight < 500.dp
         val cameraHeight by animateDpAsState(
-            targetValue = if (compactCamera) 56.dp else (maxHeight * .40f).coerceIn(210.dp, 330.dp),
+            targetValue = if (compactCamera) 56.dp else (availableHeight * .40f).coerceIn(210.dp, 330.dp),
             animationSpec = tween(180),
             label = "camera-height"
         )
@@ -226,7 +227,7 @@ fun CookScreen(
                     onModeChange = { analyzed = it },
                     onConnect = { connect = true },
                     onToggleSize = { cameraCollapsed = !cameraCollapsed },
-                    canExpand = !keyboardVisible && maxHeight >= 500.dp,
+                    canExpand = !keyboardVisible && availableHeight >= 500.dp,
                     modifier = Modifier.fillMaxWidth().height(cameraHeight)
                 )
             }
@@ -272,7 +273,7 @@ fun CookScreen(
                 Text("PRACTICE · DEMO", color = GoldPrimary, fontSize = 10.sp,
                     fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 18.dp, vertical = 5.dp))
             }
-            if (!(keyboardVisible && maxHeight < 220.dp)) {
+            if (!(keyboardVisible && availableHeight < 220.dp)) {
                 WorkspaceTabs(selected = workspace, onSelect = { workspace = it })
             }
 
