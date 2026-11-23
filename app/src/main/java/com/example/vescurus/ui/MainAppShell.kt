@@ -35,6 +35,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.rememberScrollState
@@ -78,6 +79,9 @@ fun MainAppShell(
     val detections by connectionManager.latestDetections.collectAsStateWithLifecycle()
 
     val observation by connectionManager.observation.collectAsStateWithLifecycle()
+    LaunchedEffect(selectedRole, observation?.sessionId, observation?.streamId, observation?.frameId) {
+        if (selectedRole == Role.COOK) observation?.let(cookViewModel::receiveIngredientObservation)
+    }
     val peerSession by connectionManager.sessionContext.collectAsStateWithLifecycle()
     val ownPairCode by connectionManager.pairCode.collectAsStateWithLifecycle()
     val analysisRequest by connectionManager.analysisRequest.collectAsStateWithLifecycle()
@@ -127,6 +131,7 @@ fun MainAppShell(
     BackHandler(enabled = selectedItem != 0) { selectedItem = 0 }
     val previousItem = remember { mutableStateOf(0) }
     val items = listOf(NavItem.Cook, NavItem.Track, NavItem.Settings)
+    val tabState = rememberSaveableStateHolder()
 
     Scaffold(
         modifier = Modifier.semantics { testTagsAsResourceId = true },
@@ -200,7 +205,7 @@ fun MainAppShell(
                 label = "TabTransition"
             ) { tabIndex ->
                 when (items[tabIndex]) {
-                    NavItem.Cook -> {
+                    NavItem.Cook -> tabState.SaveableStateProvider(selectedRole.name) {
                         RoleSpecificCookScreen(
                             selectedRole = selectedRole,
                             connectionStatus = connectionStatus,
@@ -235,7 +240,7 @@ fun MainAppShell(
                             historySyncPending > 0 -> "Saved here. Connect both phones to keep a copy on each."
                             else -> null
                         },
-                        onRetryMirror = { connectionManager.updateLocalHistory(localHistoryRecords) },
+                        onRetryMirror = connectionManager::retryHistorySync,
                         onResumeDraft = {
                             previousItem.value = selectedItem
                             selectedItem = 0

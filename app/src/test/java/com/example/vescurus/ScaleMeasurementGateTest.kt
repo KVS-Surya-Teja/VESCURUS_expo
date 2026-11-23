@@ -38,15 +38,21 @@ class ScaleMeasurementGateTest {
         assertTrue(gate.observe(packet(2, 2_000, 10.0), 5_000) is ScaleMeasurementGate.Result.Rejected)
         assertNull(gate.pending)
     }
-    @Test fun gapAndMovementRestartTheStableWindow() {
+    @Test fun gapRequiresNewZeroAndMovementRestartsTheStableWindow() {
         val gate = gate(); arm(gate)
         gate.observe(packet(1, 1_000, 10.0), 1_000)
         gate.observe(packet(2, 2_000, 10.0), 2_000)
-        gate.observe(packet(3, 4_000, 10.0), 4_000) // Gap resets the first two seconds.
-        gate.observe(packet(4, 5_000, 11.0), 5_000) // Range exceeds tolerance.
-        for (i in 6L..9L) assertEquals(ScaleMeasurementGate.Result.Waiting,
+        assertTrue(gate.observe(packet(3, 4_000, 10.0), 4_000) is ScaleMeasurementGate.Result.Invalidated)
+        for (i in 5L..10L) assertEquals(ScaleMeasurementGate.Result.Waiting,
+            gate.observe(packet(i, i * 1_000, 10.0), i * 1_000))
+        assertFalse(gate.beginAtZero(10_000))
+        gate.observe(packet(11, 11_000), 11_000)
+        assertTrue(gate.beginAtZero(11_000))
+        gate.observe(packet(12, 12_000, 10.0), 12_000)
+        gate.observe(packet(13, 13_000, 11.0), 13_000)
+        for (i in 14L..17L) assertEquals(ScaleMeasurementGate.Result.Waiting,
             gate.observe(packet(i, i * 1_000, 11.0), i * 1_000))
-        assertTrue(gate.observe(packet(10, 10_000, 11.0), 10_000) is ScaleMeasurementGate.Result.Ready)
+        assertTrue(gate.observe(packet(18, 18_000, 11.0), 18_000) is ScaleMeasurementGate.Result.Ready)
     }
     @Test fun restartTareAndDisconnectionInvalidateBaseline() {
         val gate = gate(); arm(gate)

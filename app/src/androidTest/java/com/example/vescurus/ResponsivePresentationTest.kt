@@ -109,12 +109,14 @@ class ResponsivePresentationTest {
             }
         }
         compose.waitUntil(15000) { !vm.isLoading }
+        compose.onNodeWithTag("chat-input").performTextInput("Keep this draft")
+        Espresso.closeSoftKeyboard()
         for (viewport in listOf(DpSize(800.dp,360.dp), DpSize(360.dp,720.dp))) {
             compose.runOnIdle { size = viewport }
             compose.onNodeWithTag("nav-track").performClick()
             compose.onNodeWithText("Your cooking journal").assertIsDisplayed()
             Espresso.pressBack()
-            compose.onNodeWithTag("chat-input").assertIsDisplayed()
+            compose.onNodeWithTag("chat-input").assertIsDisplayed().assertTextContains("Keep this draft")
             compose.onNodeWithTag("nav-settings").performClick()
             compose.onNodeWithTag("switch-role").performScrollTo().assertIsDisplayed()
             Espresso.pressBack()

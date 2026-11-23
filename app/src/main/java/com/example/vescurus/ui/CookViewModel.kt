@@ -120,7 +120,7 @@ class CookViewModel @JvmOverloads constructor(
         return true
     }
     fun receiveIngredientObservation(observation: Observation) {
-        if(observation.sessionId!=session.id)return
+        if(isLoading || session.completedAt != null || observation.sessionId != session.id) return
         val key="${observation.sessionId}/${observation.streamId}/${observation.frameId}"
         if(lastRecognitionKey==key)return
         lastRecognitionKey=key;recognitionJob?.cancel();recognitionInProgress=false

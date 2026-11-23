@@ -137,6 +137,7 @@ fun CookScreen(
     var showGuides by rememberSaveable { mutableStateOf(false) }
     var timerDialog by rememberSaveable { mutableStateOf(false) }
     var chat by rememberSaveable { mutableStateOf("") }
+    var draftSessionId by rememberSaveable { mutableStateOf(viewModel.sessionId) }
     var ingredientReviewed by rememberSaveable { mutableStateOf(false) }
     var ingredientFlowActive by rememberSaveable { mutableStateOf(false) }
 
@@ -207,8 +208,15 @@ fun CookScreen(
         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
     }
 
-    LaunchedEffect(session.id) {
-        chat = ""; dictationSession = null; ingredientReviewed = false; ingredientFlowActive = false
+    LaunchedEffect(session.id, viewModel.isLoading) {
+        if (!viewModel.isLoading && draftSessionId != session.id) {
+            chat = ""
+            dictationSession = null
+            ingredientReviewed = false
+            ingredientFlowActive = false
+            editor = null
+            draftSessionId = session.id
+        }
     }
     LaunchedEffect(recipe?.id) {
         if (lastRecipeId != recipe?.id) {
@@ -221,7 +229,6 @@ fun CookScreen(
         observation?.takeIf { it.sessionId == session.id }?.let {
             ingredientFlowActive = true
             ingredientReviewed = false
-            viewModel.receiveIngredientObservation(it)
         }
     }
     LaunchedEffect(session.id, recipe?.id, viewModel.cookingState, session.step) {

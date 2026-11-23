@@ -106,10 +106,13 @@ class ScaleMeasurementGate(private val config: Config) {
             invalidate()
             return Result.Invalidated("Calibration pending")
         }
+        if (previous != null && (baseline != null || pending != null) &&
+            packet.receivedElapsedMillis - previous.receivedElapsedMillis > config.maximumPacketGapMillis) {
+            invalidate()
+            return Result.Invalidated("Scale readings were interrupted; establish zero again")
+        }
         pending?.let { return Result.Pending(it) }
         val zero = baseline ?: return Result.Waiting
-        if (previous != null && packet.receivedElapsedMillis - previous.receivedElapsedMillis > config.maximumPacketGapMillis)
-            resetWindow()
         val increase = packet.grams - zero.grams
         if (increase < -config.zeroToleranceGrams) {
             invalidate()
