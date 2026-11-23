@@ -316,7 +316,13 @@ in the final verification below; the engine change is not itself proof of succes
 
 ### Final verification gate
 
-Latest local debug APK available for later installation: `2aa09cf14f4ef338245979c62fb3b2a2556b3daecffcd991971336ab7bda6042`.
+The follow-up software pass preserves unsent Cook drafts when returning from
+Track or Settings. Cook records camera responses while another app tab is open.
+The Track retry explicitly resends pending copies even when the local records
+have not changed. An interrupted scale sample stream invalidates the armed zero
+and any pending comparison. The scale gate still requires real hardware integration.
+
+Latest local debug APK available for later installation: `c41bf1e4316134d5e6664f57cc1be39cd72e0d8f7b58aa4915d7d045ff1ae796`.
 
 Last physically installed debug APK SHA-256 (both devices, before disconnection):
 `bef216dd77a0078a57f71de5e6adc7ad7d2121d948afb17f82b3e96fd7d4e0b2`.
@@ -334,12 +340,12 @@ The preparation-only revision/audit correction, later UI refinement and recipe-j
 ownership fixes were added afterward. The user intentionally disconnected both
 phones; the newest APK needs later physical installation/recheck. Two additional
 Android regression cases cover late recipe replies and starting cooking while a
-planner is pending. The [successful GitHub gate](https://github.com/KVS-Surya-Teja/VESCURUS_expo/actions/runs/45060003847)
-verified application revision `2b5507bd7f3b626a4aba33057cbaa9cb6211b6b2`: **64 JVM
+planner is pending. The [successful GitHub gate](https://github.com/KVS-Surya-Teja/VESCURUS_expo/actions/runs/45106022732)
+verified application revision `4012d3b2dde26be1c84c73bd994e689e942a237d`: **64 JVM
 tests; 15 Android tests passed, 1 optional installed-voice test skipped** on API 35;
 app/test APK builds and lint completed with 0 errors. The real voice generation
 pass belongs to Samsung, not that emulator skip. The downloaded CI artifact was
-verified against SHA-256 `b70469d733711a58a9215bf4c79f5145041b3f133fc6273db9a0edb5ed3e9026`.
+verified against SHA-256 `5c2313e6d32d9cab4cfb75c9c09ee0842662aafe30e45d5bad26df836fdad08b`.
 
 New history checks passed on real loopback TCP using **separate private storage
 and preferences per simulated peer**, not a shared-file shortcut. They verify

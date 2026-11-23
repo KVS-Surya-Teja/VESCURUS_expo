@@ -274,7 +274,7 @@
     }
   },
   "latestSoftwareBuild": {
-    "apkSha256": "2aa09cf14f4ef338245979c62fb3b2a2556b3daecffcd991971336ab7bda6042",
+    "apkSha256": "c41bf1e4316134d5e6664f57cc1be39cd72e0d8f7b58aa4915d7d045ff1ae796",
     "installedOnPhones": false,
     "reason": "Phones intentionally disconnected; newest history, chat, nutrient and usability changes are not installed or physically verified.",
     "jvmTests": 64,
@@ -282,11 +282,11 @@
     "androidTestsLastPhysicalPass": 7,
     "figmaDesign": "https://www.figma.com/design/Zcx3aNpssrtaWoefR8OLJJ",
     "hardwareScaleAvailable": false,
-    "ciUrl": "https://github.com/KVS-Surya-Teja/VESCURUS_expo/actions/runs/45060003847",
-    "verifiedAppRevision": "2b5507bd7f3b626a4aba33057cbaa9cb6211b6b2",
+    "ciUrl": "https://github.com/KVS-Surya-Teja/VESCURUS_expo/actions/runs/45106022732",
+    "verifiedAppRevision": "4012d3b2dde26be1c84c73bd994e689e942a237d",
     "androidEmulatorPassed": 15,
     "androidEmulatorSkipped": 1,
-    "ciArtifactSha256": "b70469d733711a58a9215bf4c79f5145041b3f133fc6273db9a0edb5ed3e9026",
+    "ciArtifactSha256": "5c2313e6d32d9cab4cfb75c9c09ee0842662aafe30e45d5bad26df836fdad08b",
     "textEndpointFinalHealth": {
       "httpStatus": 200,
       "reply": "Ready.",
