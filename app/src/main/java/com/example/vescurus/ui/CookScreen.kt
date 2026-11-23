@@ -169,26 +169,36 @@ fun CookScreen(
     val recipe = session.recipe
     var lastRecipeId by rememberSaveable(session.id) { mutableStateOf(recipe?.id) }
     val entries = session.entries.filter { it.status != EntryStatus.UNDONE }
-    val observations = remember(detections) {
-        detections.filter { it.supported && it.confidence >= .5f }
+    // Keep an explicitly captured scan available for reviewing its separate piles.
+    var reviewScan by remember(session.id) { mutableStateOf<Observation?>(null) }
+    val capturedScan = observation?.takeIf { it.sessionId == session.id } ?: reviewScan
+    val reviewDetections = capturedScan?.detections.orEmpty().filterNot { detection ->
+        entries.any { entry ->
+            entry.vision?.let { it.streamId == capturedScan?.streamId && it.frameId == capturedScan?.frameId &&
+                canonicalizeIngredientLabel(it.label) == canonicalizeIngredientLabel(detection.label) } == true
+        }
+    }
+    val observations = remember(reviewDetections) {
+        reviewDetections.filter { it.supported && it.confidence >= .5f }
             .mapNotNull { canonicalizeIngredientLabel(it.label) }
             .filter { it != "Unsupported object" }
             .distinct()
     }
 
     fun reviewObservation(name: String) {
-        val proposedPreparation = observation?.detections?.firstOrNull {
+        val proposedPreparation = capturedScan?.detections?.firstOrNull {
             canonicalizeIngredientLabel(it.label)?.equals(name, true) == true
         }?.preparation.orEmpty()
         editor = EntryEditor(
             input = name,
-            vision = observation?.let { VisionEvidence(it.sessionId, it.streamId, it.frameId, name) },
+            vision = capturedScan?.let { VisionEvidence(it.sessionId, it.streamId, it.frameId, name) },
             condition = proposedPreparation
         )
     }
     fun identifyIngredient() {
         ingredientFlowActive = true
         ingredientReviewed = false
+        reviewScan = null
         workspace = 0
         onSnapshot()
     }
@@ -227,6 +237,7 @@ fun CookScreen(
     }
     LaunchedEffect(observation?.sessionId, observation?.streamId, observation?.frameId) {
         observation?.takeIf { it.sessionId == session.id }?.let {
+            reviewScan = it.takeIf { scan -> scan.status == "SUCCESS" }
             ingredientFlowActive = true
             ingredientReviewed = false
         }
@@ -382,7 +393,7 @@ fun CookScreen(
                                     busy = viewModel.recognitionInProgress,
                                     planning = viewModel.isFetchingRecipes,
                                     notice = viewModel.recognitionMessage,
-                                    detections = detections,
+                                    detections = reviewDetections,
                                     reviewed = ingredientReviewed,
                                     hasIngredients = entries.isNotEmpty(),
                                     onIdentify = ::identifyIngredient,
@@ -816,13 +827,13 @@ private fun IngredientRecognitionCard(
     onRecipes: () -> Unit
 ) {
     val proposals = detections.filter { it.supported && it.confidence >= .5f }
-        .distinctBy { canonicalizeIngredientLabel(it.label) }.take(2)
+        .distinctBy { canonicalizeIngredientLabel(it.label) }.take(8)
     SessionCard(
         when {
             planning -> "Planning your recipe"
             busy -> "Looking at your ingredient"
+            proposals.isNotEmpty() -> "Review your ingredients"
             reviewed -> "Ready for your recipe"
-            proposals.isNotEmpty() -> "Review your ingredient"
             else -> "Let’s see what you have"
         }
     ) {
@@ -832,8 +843,6 @@ private fun IngredientRecognitionCard(
                 CircularProgressIndicator(Modifier.size(18.dp), color = GoldPrimary, strokeWidth = 2.dp)
                 Text("Keep the ingredient in view.", color = Muted, fontSize = 13.sp)
             }
-            reviewed -> Text("Place the next ingredient in view, or find a recipe with what you’ve saved.",
-                color = Muted, fontSize = 13.sp, lineHeight = 19.sp)
             proposals.isNotEmpty() -> {
                 proposals.forEach { detection ->
                     val name = canonicalizeIngredientLabel(detection.label) ?: detection.label
@@ -846,6 +855,8 @@ private fun IngredientRecognitionCard(
                 if (proposals.size > 1) Text("Weigh separately, or record the whole batch together. Its weight cannot be split automatically.",
                     color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
             }
+            reviewed -> Text("Place the next ingredient in view, or find a recipe with what you’ve saved.",
+                color = Muted, fontSize = 13.sp, lineHeight = 19.sp)
             else -> Text(notice ?: if (connected) "Place one ingredient in view and tap Identify ingredient on the camera."
                 else "Connect a camera phone, or enter your ingredients below.",
                 color = Muted, fontSize = 13.sp, lineHeight = 19.sp)

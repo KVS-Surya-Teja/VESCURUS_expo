@@ -267,6 +267,13 @@ class CookViewModel @JvmOverloads constructor(
 
     fun planRecipeForIngredients() {
         if(isFetchingRecipes || isLoading || session.completedAt!=null || cookingState==CookingState.COOKING || cookingState==CookingState.DONE || confirmedIngredients.isEmpty())return
+        if (session.planningNotes.isEmpty()) quickChoppedSalad(session)?.let { salad ->
+            selectRecipe(salad)
+            val reply = "Make a quick cucumber, carrot and beetroot salad. Start cooking when ready."
+            appendMessage(ChatMessage("Assistant", reply))
+            speak(reply)
+            return
+        }
         val snapshot=session;val conversation=messages.toList();val owner=session.id;val token=++fetchGeneration
         fetchJob=viewModelScope.launch {
             isFetchingRecipes=true;recipeMessage="Planning with your ingredients and preferences…"
