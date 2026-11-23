@@ -389,6 +389,8 @@ fun AccountScreen(role: Role, viewModel: CookViewModel, onResetRole: () -> Unit,
             }
         }
 
+        if (role == Role.COOK) ScaleSettings(viewModel.scale)
+
         if (role != Role.GUIDE) SessionCard("Voice guidance") {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {

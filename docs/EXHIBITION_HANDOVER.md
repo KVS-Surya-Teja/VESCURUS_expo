@@ -3,9 +3,8 @@
 22 November 2026. Kotlin/Compose; Camera phone and Cooking phone roles.
 The role picker now offers Camera phone and Cooking phone only. Practice/Demo is
 not exposed; its legacy records and isolated test support are retained without deleting data.
-The ESP32/HX711 was unavailable during this run. Live scale transport and mounted
-calibration are not integrated in this branch.
-Enter externally measured amounts manually, or leave quantities unknown.
+The ESP32/HX711 was unavailable during this run. The local scale transport and Cook flow are implemented. Firmware upload and
+mounted calibration are pending physical verification. Manual and unknown amounts remain available.
 
 ## Setup
 
@@ -181,7 +180,7 @@ of a previously saved Demo role. Existing stored records are preserved.
 | Prominent camera, visible AI HUD, persistent typed/dictated assistant | Native layout tests; latest physical rotation/keyboard/camera verification still pending. |
 | Cook controls; Guide holds camera; recognize one item, review confidence/condition | Implemented with correlated frame/session/request identity; earlier real multi-food and empty scenes, current-prompt photo replay. |
 | Explicit quantities, correction, Next / Find recipes | Manual/unknown amounts supported; no invented scale readings or inferred transfer. |
-| Real calibrated weighing, five-second settling, LCD grams | Gate prepared and tested; ESP32/sketch/stand unavailable, so transport, final calibration and measured performance remain pending. |
+| Real calibrated weighing, five-second settling, LCD grams | Firmware, local transport and Cook UI implemented and the gate tested. Physical firmware upload, mounted calibration, and measured performance remain pending. |
 | Dietary/time preferences, pantry nuance, mistakes and corrections | Saved planning notes + full conversation + contextual AI requests; source-backed structured recipe checks passed. Recovery is conversational advice, not automatic rewriting of remaining recipe steps. |
 | Natural speech, speaker 5, speed 1.1 | Kitten local provider benchmark passed on Samsung; separate provider/model installation remains required. |
 | Pause/resume, user-controlled timer/step advancement | Automated flow and earlier physical checks; timer expiry never advances steps. |
@@ -322,7 +321,7 @@ The Track retry explicitly resends pending copies even when the local records
 have not changed. An interrupted scale sample stream invalidates the armed zero
 and any pending comparison. The scale gate still requires real hardware integration.
 
-Latest local debug APK available for later installation: `c41bf1e4316134d5e6664f57cc1be39cd72e0d8f7b58aa4915d7d045ff1ae796`.
+Prior software-only verification APK: `c41bf1e4316134d5e6664f57cc1be39cd72e0d8f7b58aa4915d7d045ff1ae796`.
 
 Last physically installed debug APK SHA-256 (both devices, before disconnection):
 `bef216dd77a0078a57f71de5e6adc7ad7d2121d948afb17f82b3e96fd7d4e0b2`.
@@ -337,8 +336,7 @@ analysis failure did not recur on the successful gate. Seven Android tests passe
 real Kitten audio generation, unknown quantity/correction/removal, retained recipe
 with camera review, protocol recovery/remote commands/photos, and storage recovery.
 The preparation-only revision/audit correction, later UI refinement and recipe-job
-ownership fixes were added afterward. The user intentionally disconnected both
-phones; the newest APK needs later physical installation/recheck. Two additional
+ownership fixes were added afterward. The phones were disconnected for that software gate. See the later physical phone update below. Two additional
 Android regression cases cover late recipe replies and starting cooking while a
 planner is pending. The [successful GitHub gate](https://github.com/KVS-Surya-Teja/VESCURUS_expo/actions/runs/45106022732)
 verified application revision `4012d3b2dde26be1c84c73bd994e689e942a237d`: **64 JVM
@@ -359,8 +357,7 @@ local-path protection and bounded redundant revision growth. Four nutrient JVM
 cases cover source units/conflicts, invalid/missing values and backwards-compatible
 serialization. The older exhibition fixture's View-in-Track callback omission was
 fixed; the complete final gate passes. These are **not** two physical phones or a
-real cooked meal. Both phones need the new APK and pairing before their genuine
-history starts copying; the last installed build remains unchanged above.
+real cooked meal. See the physical phone update below for the subsequent installation and pairing checks.
 
 Three Android tests exercise 360×720 and 800×360 dp configurations:
 startup/role selection/Guide, camera and AI HUD plus retained chat draft and ingredient
@@ -394,31 +391,53 @@ Actual main-role screenshots contain no Demo controls.
 Isolated test fixtures are never
 represented as a physically cooked meal or a real scale measurement.
 
-### Scale: reported wiring and pending work
+### ESP32 kitchen scale
 
-Reported assembly: HX711 DT **18**, SCK **19**; I²C SDA **21**, SCL **22**;
-16×2 LCD at **0x27**; `HX711_ADC` and `LiquidCrystal_I2C`; provisional factor **350**.
-No working sketch was present in the repository or supplied in this run, and no
-ESP32 USB device was connected. These are user-reported pins, not inspected wiring.
-No firmware, real scale transport, tare/calibration response or measured quantity
-has been verified or substituted with simulated data.
+The maintained sketch is [VescurusScale.ino](../firmware/VescurusScale/VescurusScale.ino).
+It uses HX711 ADC with DT 18 and SCK 19, and a 16×2 LCD at 0x27 with SDA 21
+and SCL 22. The pasted sketch was incomplete. The repository version implements
+the local transport needed by Cook using the supplied wiring and provisional factor 350.
 
-After mounting, extend the actual sketch: responsive HX711 sampling, separately
-throttled LCD/network updates, no blanket ±5 g suppression, explicit tare and
-persisted calibration. A future local transport can reuse Guide's HTTP service
-and forward scale packets to Cook, the session owner. Packets need device/boot ID,
-sequence, sender uptime, tare/calibration epochs, stable/unstable state and grams;
-restarts or epoch changes invalidate any unfinished before/after baseline.
-Duplicates must not create repeated ingredient entries. Association and transfer
-remain explicit user confirmations.
+1. Install Arduino ESP32 board support, HX711_ADC and LiquidCrystal I2C. Select
+   the actual ESP32 board. Copy `ScaleWifi.example.h` to the ignored `ScaleWifi.h`
+   beside the sketch and enter your shared Wi-Fi details there. Upload over USB.
+2. Open the serial monitor at 115200 with newline enabled. With the final holder
+   in place and empty, type `tare`. Wait for “Tare complete.”
+3. Place a known mass on the holder and wait for it to settle. Type `cal 200`
+   if the known mass is 200 g. Use the actual mass. Remove it and tare again.
+   The saved factor survives reboot. Each restart asks for an empty-holder tare.
+4. In Cook Settings → Kitchen scale, enter the IPv4 address printed over serial.
+   Cook polls the ESP32’s `GET /weight` locally. The tare button waits for the new
+   tare revision and a ready reading before reporting completion.
+5. Review the ingredient, confirm its name, and tap **Start weighing** while the
+   holder reads a stable zero. Place the ingredient and hold it steady. Once a
+   continuous five-second window passes, Cook offers **Save … g from scale**.
+   A repeat packet cannot add another ingredient. Manual entry and unknown amounts
+   remain available. A measurement is for the whole batch. Confirm transfer after
+   putting the ingredient into the dish.
 
-Mounted calibration procedure (pending): record zero with the final platform/bowl;
-apply several known loads spanning the useful range; repeat each placement at
-least five times; record settling, error against each known load, spread, zero
-return and drift. Repeat after bowl removal/replacement and device restart.
-Report the actual error/repeatability before claiming useful 1 g performance.
-Displayed 1 g increments do not establish 1 g accuracy. No measured end-to-end
-cooking demonstration can be claimed until that hardware is present and calibrated.
+Readings are signed grams. The LCD keeps its rightmost character as `g` when a
+weight is available and refreshes independently of phone polls. The firmware
+exposes sample identity, age, readiness, calibration and tare revisions. Cook
+invalidates the pending comparison when samples stop or the scale is restarted,
+tared, or recalibrated. Current trial settings use a 3 g minimum addition and
+1 g stability and zero tolerances. The thresholds are operating settings.
+
+Check zero return and several known loads on the mounted platform. Repeat each
+placement five times and record settling, error, spread and drift. Repeat after
+bowl removal and reboot with Wi-Fi and LCD running. The ESP32 USB device was
+absent during the phone installation, so upload, calibration, LCD agreement and
+the complete physical measurement path remain to be verified.
+
+### Physical phone update, 23 November 2026
+
+The same APK was installed over existing data on Redmi Guide and Samsung Cook.
+SHA-256: `278c4380a08892816f25d111b6da2abcb6eb8bc3458802789802b1ec170124d5`.
+Both phones paired on their common Wi-Fi. An actual Cook-triggered camera result
+arrived on both devices with matching session, stream and frame identity. It
+reported poor image quality. A positive ingredient scene remains to be checked
+on this build. Both Track screens showed the corresponding existing draft and
+conversation control. Samsung initialized the local speaker 5 voice at 1.1×.
 
 ## Earlier UI synthesis (historical baseline)
 

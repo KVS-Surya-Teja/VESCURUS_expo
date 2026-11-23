@@ -252,13 +252,15 @@ fun CookScreen(
     editor?.let { entry ->
         IngredientDialog(
             editor = entry,
+            scale = viewModel.scale.takeUnless { viewModel.isDemo || entry.id != null },
+            onMeasured = viewModel::announceWeight,
             onDismiss = { editor = null },
-            onSave = { name, amount, unit, condition ->
+            onSave = { name, amount, unit, condition, measurement ->
                 if (entry.id == null) {
                     viewModel.addIngredient(
                         name, amount, unit,
                         entry.vision?.takeIf { it.label.equals(name.trim(), true) },
-                        entry.requestId, condition
+                        entry.requestId, condition, measurement
                     )
                 } else {
                     viewModel.correctEntry(entry.id, name, amount, unit, condition)
@@ -1235,12 +1237,19 @@ private fun StepTimerDialog(onDismiss: () -> Unit, onSave: (Long?) -> Unit) {
 }
 
 @Composable
-private fun IngredientDialog(editor: EntryEditor, onDismiss: () -> Unit, onSave: (String, Double?, QuantityUnit, String?) -> Unit) {
+private fun IngredientDialog(
+    editor: EntryEditor, scale: CookScale?, onMeasured: (Double) -> Unit,
+    onDismiss: () -> Unit,
+    onSave: (String, Double?, QuantityUnit, String?, com.example.vescurus.session.ScaleMeasurementGate.Measurement?) -> Unit
+) {
     var input by rememberSaveable(editor.requestId) { mutableStateOf(editor.input) }
     var amount by rememberSaveable(editor.requestId) { mutableStateOf(editor.amount) }
     var unit by rememberSaveable(editor.requestId) { mutableStateOf(editor.unit) }
     var condition by rememberSaveable(editor.requestId) { mutableStateOf(editor.condition) }
     var nameConfirmed by rememberSaveable(editor.requestId) { mutableStateOf(editor.vision == null || editor.id != null) }
+    val connectedScale = scale?.takeIf { it.address.isNotBlank() }
+    var scaleHint by remember { mutableStateOf("") }
+    if (nameConfirmed && connectedScale != null) MonitorScale(connectedScale, onMeasured)
     val value = amount.trim().toDoubleOrNull()
     val valid = input.isNotBlank() && input.length <= 240 &&
         (amount.isBlank() || (value != null && value.isFinite() && value > 0 && value <= 10_000_000 &&
@@ -1270,7 +1279,28 @@ private fun IngredientDialog(editor: EntryEditor, onDismiss: () -> Unit, onSave:
                         .testTag("ingredient-preparation")
                 )
                 if (nameConfirmed) {
-                if (editor.vision != null) Text("Place $input on your scale. Enter its reading below. No scale is connected to this session; this amount will be recorded as manual.", fontSize = 13.sp)
+                if (connectedScale != null) {
+                    val reading = connectedScale.reading
+                    Text(reading?.takeIf { it.status == "ready" }?.let { scaleGrams(it.grams) }
+                        ?: connectedScale.status, fontSize = 16.sp)
+                    val measured = connectedScale.measurement
+                    if (measured != null) {
+                        Button(enabled = input.isNotBlank() && input.length <= 240, onClick = {
+                            onSave(input.trim(), null, QuantityUnit.GRAMS, condition.trim().ifBlank { null }, measured)
+                        }) { Text("Save ${scaleGrams(measured.grams)} from scale") }
+                    } else if (connectedScale.weighing) {
+                        Text("Place the ingredient on the holder and keep it still for five seconds.", fontSize = 13.sp)
+                    } else {
+                        Text("Start with the empty, tared holder.", fontSize = 13.sp)
+                        OutlinedButton(enabled = reading?.status == "ready" && reading.calibrated && reading.stable,
+                            onClick = {
+                                scaleHint = if (connectedScale.beginWeighing()) "" else "Wait for a stable zero reading."
+                            }) { Text("Start weighing") }
+                        Text(scaleHint.ifBlank { connectedScale.status }, fontSize = 12.sp)
+                    }
+                } else if (editor.vision != null) {
+                    Text("Enter the amount you weighed, or leave it blank. Connect a kitchen scale in Settings.", fontSize = 13.sp)
+                }
                 OutlinedTextField(
                     amount, { amount = it },
                     keyboardOptions = KeyboardOptions(keyboardType = if (unit == QuantityUnit.COUNT) KeyboardType.Number else KeyboardType.Decimal),
@@ -1294,7 +1324,7 @@ private fun IngredientDialog(editor: EntryEditor, onDismiss: () -> Unit, onSave:
             TextButton(
                 enabled = valid, onClick = {
                     if (!nameConfirmed) nameConfirmed = true else onSave(input.trim(), value, unit,
-                        condition.trim().takeIf { it.isNotEmpty() })
+                        condition.trim().takeIf { it.isNotEmpty() }, null)
                 },
                 modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("save-ingredient")
             ) { Text(when {

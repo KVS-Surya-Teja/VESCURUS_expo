@@ -43,6 +43,7 @@ class ScaleMeasurementGate(private val config: Config) {
         val baselineSequence: Long,
         val finalSequence: Long,
         val stableForMillis: Long,
+        val baselineGrams: Double,
     )
     sealed class Result {
         data class Rejected(val reason: String) : Result()
@@ -139,7 +140,7 @@ class ScaleMeasurementGate(private val config: Config) {
         val measurement = Measurement(
             "${packet.deviceId}:${packet.bootId}:${packet.calibrationEpoch}:${packet.tareEpoch}:${zero.sequence}:${packet.sequence}",
             windowSum / windowCount, packet.deviceId, packet.bootId, packet.calibrationEpoch,
-            packet.tareEpoch, zero.sequence, packet.sequence, duration,
+            packet.tareEpoch, zero.sequence, packet.sequence, duration, zero.grams,
         )
         pending = measurement
         return Result.Ready(measurement)

@@ -82,6 +82,7 @@ class CookViewModel @JvmOverloads constructor(
 ) : AndroidViewModel(application), TextToSpeech.OnInitListener {
     private val store=SessionStore(directory)
     private val prefs=application.getSharedPreferences("vescurus",0)
+    val scale = CookScale(prefs)
     private val repository=UniversalRecipeRepository()
     private val writes=Channel<Pair<Long,LocalState>>(Channel.CONFLATED)
     private var saveGeneration=0L
@@ -228,14 +229,21 @@ class CookViewModel @JvmOverloads constructor(
         session=new.copy(version=session.version+1,updatedAt=System.currentTimeMillis());persist()
     }
     fun confirmIngredient(label: String) = addIngredient(label,null,QuantityUnit.GRAMS)
-    fun addIngredient(input: String, amount: Double?, unit: QuantityUnit, vision: VisionEvidence?=null, eventId: String=UUID.randomUUID().toString(), condition: String?=null) {
+    fun addIngredient(input: String, amount: Double?, unit: QuantityUnit, vision: VisionEvidence?=null, eventId: String=UUID.randomUUID().toString(), condition: String?=null,
+        measurement: ScaleMeasurementGate.Measurement? = null) {
         if(isLoading || session.completedAt!=null)return
         val identities=input.split(',','+').mapNotNull(::canonicalizeIngredientLabel).filter { it!="Unsupported object" && it.length<=80 }.distinct()
         if(identities.isEmpty())return
-        val q=amount?.let { Quantity(it,unit) }
-        val entry=IngredientEntry(id=eventId,sessionId=session.id,identities=identities,
+        if (measurement != null && (scale.measurement != measurement || session.entries.any { it.id == measurement.id })) return
+        val q = if (measurement != null) Quantity(measurement.grams, QuantityUnit.GRAMS)
+            else amount?.let { Quantity(it,unit) }
+        val evidence = measurement?.let {
+            ScaleEvidence(it.deviceId, it.bootId, it.finalSequence, it.tareEpoch, it.calibrationEpoch,
+                it.baselineGrams, it.baselineGrams + it.grams)
+        }
+        val entry=IngredientEntry(id=measurement?.id ?: eventId,sessionId=session.id,identities=identities,
             identitySource=if(identities.size>1) EvidenceSource.MIXED else if(vision!=null) EvidenceSource.VISION_CONFIRMED else EvidenceSource.MANUAL,
-            quantity=q,quantitySource=if(q!=null) EvidenceSource.MANUAL else null,vision=vision,ingredientPreparation=condition?.trim()?.take(120)?.takeIf { it.isNotEmpty() })
+            quantity=q,quantitySource=when { measurement != null -> EvidenceSource.SCALE; q != null -> EvidenceSource.MANUAL; else -> null },scale=evidence,vision=vision,ingredientPreparation=condition?.trim()?.take(120)?.takeIf { it.isNotEmpty() })
         val next=SessionReducer.add(session,entry,System.currentTimeMillis())
         if(next!=session) { session=next;persist();recipeMessage="Ready to find recipes for these ingredients." }
     }
@@ -474,6 +482,7 @@ class CookViewModel @JvmOverloads constructor(
         android.util.Log.i("VescurusVoice", "Offline voice unavailable; using phone voice")
         voice = createPhoneVoice()
     }
+    internal fun announceWeight(grams: Double) = speak("Measured ${scaleGrams(grams)}. Confirm to save the amount.")
     private fun speak(text: String) { if(isTtsEnabled && voiceReady)voice?.speak(spokenGuidance(text),TextToSpeech.QUEUE_FLUSH,null,"vescurus-step") }
     override fun onCleared() { timerJob?.cancel();voice?.stop();voice?.shutdown();writes.close();super.onCleared() }
 }
