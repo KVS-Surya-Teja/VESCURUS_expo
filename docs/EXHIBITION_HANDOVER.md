@@ -398,8 +398,10 @@ It uses HX711 ADC with DT 18 and SCK 19, and a 16×2 LCD at 0x27 with SDA 21
 and SCL 22. The pasted sketch was incomplete. The repository version implements
 the local transport needed by Cook using the supplied wiring and provisional factor 350.
 
-1. Install Arduino ESP32 board support, HX711_ADC and LiquidCrystal I2C. Select
-   the actual ESP32 board. Copy `ScaleWifi.example.h` to the ignored `ScaleWifi.h`
+1. Install Arduino ESP32 board support, HX711_ADC and LiquidCrystal I2C. The
+   source compiled for the generic ESP32 with Arduino ESP32 3.3.5, HX711_ADC
+   1.2.12 and LiquidCrystal I2C 1.1.2. The LCD library declares AVR support,
+   so check the existing LCD on the real hardware. Select the actual ESP32 board. Copy `ScaleWifi.example.h` to the ignored `ScaleWifi.h`
    beside the sketch and enter your shared Wi-Fi details there. Upload over USB.
 2. Open the serial monitor at 115200 with newline enabled. With the final holder
    in place and empty, type `tare`. Wait for “Tare complete.”
@@ -433,7 +435,9 @@ the complete physical measurement path remain to be verified.
 
 The same APK was installed over existing data on Redmi Guide and Samsung Cook.
 SHA-256: `278c4380a08892816f25d111b6da2abcb6eb8bc3458802789802b1ec170124d5`.
-Both phones paired on their common Wi-Fi. An actual Cook-triggered camera result
+The installed checksum matched on both devices. The Android build, 64 JVM tests
+and lint passed locally, and the [Android verification workflow](https://github.com/KVS-Surya-Teja/VESCURUS_expo/actions/runs/45135031350)
+also passed. Both phones paired on their common Wi-Fi. An actual Cook-triggered camera result
 arrived on both devices with matching session, stream and frame identity. It
 reported poor image quality. A positive ingredient scene remains to be checked
 on this build. Both Track screens showed the corresponding existing draft and

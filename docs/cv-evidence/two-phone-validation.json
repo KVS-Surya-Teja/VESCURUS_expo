@@ -424,5 +424,26 @@
       "physicalPhonesVerified": false,
       "requires": "New APK on both phones and pairing. Existing records are retained; earlier never-persisted chats cannot be reconstructed."
     }
+  },
+  "scaleBuildPhoneVerification": {
+    "apkSha256": "278c4380a08892816f25d111b6da2abcb6eb8bc3458802789802b1ec170124d5",
+    "appRevision": "a510173d02219ab46eb264c2a72d7b3effecf5fb",
+    "ciUrl": "https://github.com/KVS-Surya-Teja/VESCURUS_expo/actions/runs/45135031350",
+    "installedWithDataPreservedOn": [
+      "Redmi Guide",
+      "Samsung Cook"
+    ],
+    "apkDigestRecheckedOnBoth": true,
+    "pairedOnSameWifi": true,
+    "matchedFrame": {
+      "sessionPrefix": "8402bd2f",
+      "streamPrefix": "38abfdaa",
+      "frameId": 976,
+      "status": "POOR_IMAGE"
+    },
+    "trackCheck": "Both phones displayed the existing recipe draft and its conversation control.",
+    "scaleSettingsOnSamsung": true,
+    "positiveRecognitionOnThisBuild": false,
+    "physicalScaleVerified": false
   }
 }
