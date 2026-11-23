@@ -56,10 +56,13 @@ void weight() {
 }
 
 void lcdRow(uint8_t row, const char* text) {
-  lcd.setCursor(0, row);
+  static char previous[2][17]{};
   char line[17];
   snprintf(line, sizeof(line), "%-16.16s", text);
+  if (strcmp(previous[row], line) == 0) return;
+  lcd.setCursor(0, row);
   lcd.print(line);
+  memcpy(previous[row], line, sizeof(line));
 }
 
 void serialCommand(const String& command) {
@@ -174,13 +177,26 @@ void loop() {
     if (ip != shown) { shown = ip; Serial.print("Scale IP: "); Serial.println(ip); }
     server.handleClient();
   }
-  if (now - lastDisplay >= 250) {
-    lastDisplay = now;
-    lcdRow(0, !fresh() ? "Check sensor" : taring ? "Taring..." : !zeroed ? "Empty then tare" :
-      !calibration.revision ? "Provisional" : stable ? "Weight" : "Settling");
-    char line[32];
-    if (ready()) snprintf(line, sizeof(line), "%15.1f%c", grams, 'g');
-    else snprintf(line, sizeof(line), "              --");
+  const uint32_t displayNow = millis();
+  if (displayNow - lastDisplay >= 250) {
+    lastDisplay = displayNow;
+    // Show the hotspot-assigned address periodically so it can be entered on Cook.
+    const bool showAddress = !taring && WiFi.status() == WL_CONNECTED &&
+      displayNow % 8000 < 2500;
+    if (showAddress) {
+      const String ip = WiFi.localIP().toString();
+      lcdRow(0, ip.c_str());
+    } else {
+      lcdRow(0, !fresh() ? "Check sensor" : taring ? "Taring..." : !zeroed ? "Empty then tare" :
+        !calibration.revision ? "Provisional" : stable ? "Weight" : "Settling");
+    }
+    char line[17] = "             --g";
+    if (ready()) {
+      // Suppress negative zero only in the rounded LCD presentation.
+      const float displayGrams = fabsf(grams) < 0.05f ? 0.0f : grams;
+      const int length = snprintf(line, sizeof(line), "%15.1fg", displayGrams);
+      if (length != 16) memcpy(line, "      Overrangeg", sizeof(line));
+    }
     lcdRow(1, line);
   }
 }
