@@ -266,15 +266,15 @@ fun CookScreen(
             scale = viewModel.scale.takeUnless { viewModel.isDemo || entry.id != null },
             onMeasured = viewModel::announceWeight,
             onDismiss = { editor = null },
-            onSave = { name, amount, unit, condition, measurement ->
+            onSave = { name, amount, unit, condition, measurement, estimated ->
                 if (entry.id == null) {
                     viewModel.addIngredient(
                         name, amount, unit,
                         entry.vision?.takeIf { it.label.equals(name.trim(), true) },
-                        entry.requestId, condition, measurement
+                        entry.requestId, condition, measurement, estimated
                     )
                 } else {
-                    viewModel.correctEntry(entry.id, name, amount, unit, condition)
+                    viewModel.correctEntry(entry.id, name, amount, unit, condition, estimated)
                 }
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 ingredientReviewed = true
@@ -949,7 +949,7 @@ private fun IngredientEntryCard(
                 if (entry.quantity != null) Text(
                     when (entry.quantitySource) {
                         EvidenceSource.SCALE -> "Measured by scale"
-                        EvidenceSource.MANUAL -> "Entered by you"
+                        EvidenceSource.MANUAL -> if (entry.quantityEstimated) "Estimated from portion" else "Entered by you"
                         else -> "Recorded quantity"
                     }, color = Muted, fontSize = 11.sp
                 )
@@ -1251,7 +1251,7 @@ private fun StepTimerDialog(onDismiss: () -> Unit, onSave: (Long?) -> Unit) {
 private fun IngredientDialog(
     editor: EntryEditor, scale: CookScale?, onMeasured: (Double) -> Unit,
     onDismiss: () -> Unit,
-    onSave: (String, Double?, QuantityUnit, String?, com.example.vescurus.session.ScaleMeasurementGate.Measurement?) -> Unit
+    onSave: (String, Double?, QuantityUnit, String?, com.example.vescurus.session.ScaleMeasurementGate.Measurement?, Boolean) -> Unit
 ) {
     var input by rememberSaveable(editor.requestId) { mutableStateOf(editor.input) }
     var amount by rememberSaveable(editor.requestId) { mutableStateOf(editor.amount) }
@@ -1260,6 +1260,12 @@ private fun IngredientDialog(
     var nameConfirmed by rememberSaveable(editor.requestId) { mutableStateOf(editor.vision == null || editor.id != null) }
     val connectedScale = scale?.takeIf { it.address.isNotBlank() }
     var scaleHint by remember { mutableStateOf("") }
+    var portion by rememberSaveable(editor.requestId, input) { mutableIntStateOf(0) }
+    val gramsPerCup = saladGramsPerCup(input)
+    val rawPortion = condition.lowercase().let { text ->
+        listOf("cooked", "fried", "boiled", "steamed", "roasted").none { it in text }
+    }
+
     if (nameConfirmed && connectedScale != null) MonitorScale(connectedScale, onMeasured)
     val value = amount.trim().toDoubleOrNull()
     val valid = input.isNotBlank() && input.length <= 240 &&
@@ -1297,7 +1303,7 @@ private fun IngredientDialog(
                     val measured = connectedScale.measurement
                     if (measured != null) {
                         Button(enabled = input.isNotBlank() && input.length <= 240, onClick = {
-                            onSave(input.trim(), null, QuantityUnit.GRAMS, condition.trim().ifBlank { null }, measured)
+                            onSave(input.trim(), null, QuantityUnit.GRAMS, condition.trim().ifBlank { null }, measured, false)
                         }) { Text("Save ${scaleGrams(measured.grams)} from scale") }
                     } else if (connectedScale.weighing) {
                         Text("Place the ingredient on the holder and keep it still for five seconds.", fontSize = 13.sp)
@@ -1311,6 +1317,21 @@ private fun IngredientDialog(
                     }
                 } else if (editor.vision != null) {
                     Text("Enter the amount you weighed, or leave it blank. Connect a kitchen scale in Settings.", fontSize = 13.sp)
+                }
+                if (gramsPerCup != null && rawPortion && connectedScale?.measurement == null) {
+                    Text("Estimate from loose cups", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("¼", "½", "¾", "1").forEachIndexed { index, label ->
+                            FilterChip(selected = portion == index + 1,
+                                onClick = { portion = index + 1 }, label = { Text(label) })
+                        }
+                    }
+                    if (portion > 0) {
+                        val estimate = gramsPerCup * portion / 4.0
+                        OutlinedButton(onClick = {
+                            onSave(input.trim(), estimate, QuantityUnit.GRAMS, condition.trim().ifBlank { null }, null, true)
+                        }) { Text("Save estimate ≈ ${formatQuantity(estimate)} g") }
+                    }
                 }
                 OutlinedTextField(
                     amount, { amount = it },
@@ -1335,7 +1356,7 @@ private fun IngredientDialog(
             TextButton(
                 enabled = valid, onClick = {
                     if (!nameConfirmed) nameConfirmed = true else onSave(input.trim(), value, unit,
-                        condition.trim().takeIf { it.isNotEmpty() }, null)
+                        condition.trim().takeIf { it.isNotEmpty() }, null, false)
                 },
                 modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("save-ingredient")
             ) { Text(when {

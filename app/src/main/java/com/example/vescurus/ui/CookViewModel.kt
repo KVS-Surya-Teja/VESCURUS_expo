@@ -55,7 +55,7 @@ internal fun cookingAssistantPrompt(session: CookingSession, messages: List<Chat
         val quantity = entry.quantity?.let { "${it.value} ${it.unit.label}" } ?: "quantity unknown"
         val source = when (entry.quantitySource) {
             EvidenceSource.SCALE -> "scale record"
-            EvidenceSource.MANUAL -> "entered by the user"
+            EvidenceSource.MANUAL -> if (entry.quantityEstimated) "estimated from a household portion" else "entered by the user"
             else -> "no measurement recorded"
         }
         appendLine("- ${entry.label}${entry.ingredientPreparation?.let { " ($it)" } ?: ""}: $quantity ($source; ${entry.status}).${if (entry.identities.size > 1) " This is one combined batch, not a quantity for each ingredient." else ""}")
@@ -230,7 +230,7 @@ class CookViewModel @JvmOverloads constructor(
     }
     fun confirmIngredient(label: String) = addIngredient(label,null,QuantityUnit.GRAMS)
     fun addIngredient(input: String, amount: Double?, unit: QuantityUnit, vision: VisionEvidence?=null, eventId: String=UUID.randomUUID().toString(), condition: String?=null,
-        measurement: ScaleMeasurementGate.Measurement? = null) {
+        measurement: ScaleMeasurementGate.Measurement? = null, estimated: Boolean = false) {
         if(isLoading || session.completedAt!=null)return
         val identities=input.split(',','+').mapNotNull(::canonicalizeIngredientLabel).filter { it!="Unsupported object" && it.length<=80 }.distinct()
         if(identities.isEmpty())return
@@ -243,14 +243,23 @@ class CookViewModel @JvmOverloads constructor(
         }
         val entry=IngredientEntry(id=measurement?.id ?: eventId,sessionId=session.id,identities=identities,
             identitySource=if(identities.size>1) EvidenceSource.MIXED else if(vision!=null) EvidenceSource.VISION_CONFIRMED else EvidenceSource.MANUAL,
-            quantity=q,quantitySource=when { measurement != null -> EvidenceSource.SCALE; q != null -> EvidenceSource.MANUAL; else -> null },scale=evidence,vision=vision,ingredientPreparation=condition?.trim()?.take(120)?.takeIf { it.isNotEmpty() })
+            quantity=q,quantityEstimated=measurement==null && q!=null && estimated,quantitySource=when { measurement != null -> EvidenceSource.SCALE; q != null -> EvidenceSource.MANUAL; else -> null },scale=evidence,vision=vision,ingredientPreparation=condition?.trim()?.take(120)?.takeIf { it.isNotEmpty() })
         val next=SessionReducer.add(session,entry,System.currentTimeMillis())
         if(next!=session) { session=next;persist();recipeMessage="Ready to find recipes for these ingredients." }
     }
-    fun correctEntry(id: String,input: String,amount: Double?,unit: QuantityUnit,condition: String?=null) {
+    fun correctEntry(id: String,input: String,amount: Double?,unit: QuantityUnit,condition: String?=null, estimated: Boolean = false) {
         val names=input.split(',','+').mapNotNull(::canonicalizeIngredientLabel).filter { it!="Unsupported object" && it.length<=80 }.distinct()
         if(names.isEmpty() || session.completedAt!=null)return
-        session=SessionReducer.edit(session,id,names,amount?.let { Quantity(it,unit) },if(amount!=null) EvidenceSource.MANUAL else null,System.currentTimeMillis(),condition?.trim()?.take(120)?.takeIf { it.isNotEmpty() });persist()
+        val quantity = amount?.let { Quantity(it, unit) }
+        val existing = session.entries.firstOrNull { it.id == id }
+        val source = when {
+            quantity == null -> null
+            quantity == existing?.quantity && !estimated -> existing.quantitySource
+            else -> EvidenceSource.MANUAL
+        }
+        session = SessionReducer.edit(session, id, names, quantity, source, System.currentTimeMillis(),
+            condition?.trim()?.take(120)?.takeIf { it.isNotEmpty() }, estimated)
+        persist()
     }
     fun undoEntry(id: String) { if(session.completedAt==null) { session=SessionReducer.undo(session,id,System.currentTimeMillis());persist() } }
     fun confirmTransfer(id: String) { if(session.completedAt==null) { session=SessionReducer.transfer(session,id,System.currentTimeMillis());persist() } }

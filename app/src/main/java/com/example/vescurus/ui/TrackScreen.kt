@@ -198,7 +198,7 @@ fun TrackScreen(
                             EntryStatus.UNDONE -> "Removed"
                         }
                         val quantitySource = when (entry.quantitySource) {
-                            EvidenceSource.MANUAL -> "Amount entered by you"
+                            EvidenceSource.MANUAL -> if (entry.quantityEstimated) "Estimated from portion" else "Amount entered by you"
                             EvidenceSource.SCALE -> "Scale measurement"
                             EvidenceSource.VISION_CONFIRMED -> "Recorded amount"
                             EvidenceSource.MIXED -> "Mixed quantity sources"

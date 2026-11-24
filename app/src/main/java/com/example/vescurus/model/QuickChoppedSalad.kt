@@ -12,30 +12,21 @@ internal fun quickChoppedSalad(session: CookingSession): Recipe? {
         "carrot" to doubleArrayOf(41.0, .93, 9.58, .24, 5.9),
         "beetroot" to doubleArrayOf(43.0, 1.61, 9.56, .17, 4.9)
     )
-    fun vegetable(label: String): String? {
-        val candidate = label.lowercase().replace(Regex("\\b(chopped|diced|sliced|raw|shredded|grated|julienned)\\b"), "").trim()
-        return when (candidate) {
-            "cucumber", "cucumbers" -> "cucumber"
-            "carrot", "carrots" -> "carrot"
-            "beet", "beets", "beetroot", "beetroots", "beet root" -> "beetroot"
-            else -> null
-        }
-    }
     val entries = session.entries.filter { it.status != EntryStatus.UNDONE }
-    val names = entries.flatMap { it.identities }.map { vegetable(it) ?: return null }
+    val names = entries.flatMap { it.identities }.map { saladVegetable(it) ?: return null }
     if (names.toSet() != profiles.keys || entries.any {
         it.ingredientPreparation?.contains(Regex("cooked|fried|boiled|roasted|steamed", RegexOption.IGNORE_CASE)) == true
     }) return null
     val totals = DoubleArray(5)
     val hasAmounts = entries.all { it.identities.size == 1 && it.quantity?.unit == QuantityUnit.GRAMS }
     if (hasAmounts) entries.forEach { entry ->
-        val values = profiles.getValue(vegetable(entry.identities.single())!!)
+        val values = profiles.getValue(saladVegetable(entry.identities.single())!!)
         for (index in totals.indices) totals[index] += values[index] * entry.quantity!!.value / 100
     }
     val source = "Offline salad · USDA FoodData Central estimates"
     return Recipe(
         id = "local-chopped-salad", name = "Cucumber, carrot & beetroot salad",
-        description = if (hasAmounts) "One bowl. Nutrition estimates use your recorded vegetable weights and exclude seasoning."
+        description = if (hasAmounts) "One bowl. Nutrition estimates use your recorded vegetable amounts and exclude seasoning."
             else "One bowl. Record separate gram amounts for all three vegetables to calculate nutrition.",
         totalTimeMs = 15_000, steps = listOf(
             RecipeStep(0, 5_000, "Mix the chopped cucumber, carrot and beetroot in a bowl for about five seconds."),
@@ -50,4 +41,22 @@ internal fun quickChoppedSalad(session: CookingSession): Recipe? {
         targets = entries.map { RecipeTarget(it.label, it.quantity?.value, it.quantity?.unit?.label.orEmpty(),
             it.quantity?.let { q -> "${q.value} ${q.unit.label} ${it.label}" } ?: it.label) }
     )
+}
+
+private fun saladVegetable(label: String): String? {
+    val candidate = label.lowercase().replace(Regex("\\b(chopped|diced|sliced|raw|shredded|grated|julienned)\\b"), "").trim()
+    return when (candidate) {
+        "cucumber", "cucumbers" -> "cucumber"
+        "carrot", "carrots" -> "carrot"
+        "beet", "beets", "beetroot", "beetroots", "beet root" -> "beetroot"
+        else -> null
+    }
+}
+
+/** Raw portion weights from the USDA FoodData Central April 2018 SR Legacy food_portion table. */
+internal fun saladGramsPerCup(label: String): Int? = when (saladVegetable(label)) {
+    "cucumber" -> 104 // Half a cup of slices weighs 52 g.
+    "carrot" -> 128 // Chopped.
+    "beetroot" -> 136
+    else -> null
 }

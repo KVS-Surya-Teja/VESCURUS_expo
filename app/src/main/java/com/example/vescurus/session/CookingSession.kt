@@ -21,7 +21,8 @@ import java.util.UUID
     val scale: ScaleEvidence? = null, val vision: VisionEvidence? = null,
     val status: EntryStatus = if (quantity == null) EntryStatus.IDENTIFIED else EntryStatus.PREPARED,
     val createdAt: Long = System.currentTimeMillis(), val audits: List<EntryAudit> = emptyList(),
-    val ingredientPreparation: String? = null
+    val ingredientPreparation: String? = null,
+    val quantityEstimated: Boolean = false
 ) {
     val label: String get() = identities.joinToString(" + ")
 }
@@ -55,10 +56,12 @@ object SessionReducer {
         if (s.entries.any { it.id == entry.id }) return s
         return s.copy(entries = s.entries + entry, version = s.version + 1, updatedAt = now)
     }
-    fun edit(s: CookingSession, id: String, identities: List<String>, quantity: Quantity?, source: EvidenceSource?, now: Long, preparation: String? = null): CookingSession {
+    fun edit(s: CookingSession, id: String, identities: List<String>, quantity: Quantity?, source: EvidenceSource?, now: Long, preparation: String? = null, estimated: Boolean = false): CookingSession {
         require(identities.isNotEmpty())
         return change(s,id,now,"correct") { it.copy(identities = identities, quantity = quantity, quantitySource = source,
-            identitySource = EvidenceSource.MANUAL, ingredientPreparation=preparation, scale = if (quantity == it.quantity) it.scale else null,
+            identitySource = EvidenceSource.MANUAL, ingredientPreparation=preparation,
+            quantityEstimated = quantity != null && (estimated || (quantity == it.quantity && it.quantityEstimated)),
+            scale = if (quantity == it.quantity && !estimated) it.scale else null,
             vision = null, status = if (quantity == null) EntryStatus.IDENTIFIED else EntryStatus.PREPARED) }
     }
     fun undo(s: CookingSession, id: String, now: Long) = change(s,id,now,"undo") { it.copy(status = EntryStatus.UNDONE) }
